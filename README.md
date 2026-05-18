@@ -2,7 +2,7 @@
 
 ## Deploy to Vercel
 
-### Option A — Vercel CLI (fastest)
+### Option A — Vercel CLI  (fastest)
 1. Install Node.js from nodejs.org if you don't have it
 2. Open a terminal/command prompt in this folder
 3. Run: `npm install`
