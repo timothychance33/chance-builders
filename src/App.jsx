@@ -302,7 +302,8 @@ export default function App(){
       {[{id:"dash",l:"Projects",Ic:Ic.Home},{id:"check",l:"Checklist",Ic:Ic.List},{id:"fin",l:"Financials",Ic:Ic.Dollar},{id:"subs",l:"Subs",Ic:Ic.People},{id:"portal",l:"Client",Ic:Ic.Eye},{id:"log",l:"Job Log",Ic:Ic.Log},{id:"finishes",l:"Finishes",Ic:Ic.Palette}]
         .map(({id,l,Ic:NavIc})=><button key={id} className={`nb${tab===id?" on":""}`} onClick={()=>setTab(id)} style={{fontSize:"8px"}}><NavIc/>{l}</button>)}
     </nav>
-    </>;
+    </>
+  );
 }
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────
