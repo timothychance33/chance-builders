@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 const STORAGE_KEY = "chance_builders_v2";
 const save = async (data) => { try { await window.storage.set(STORAGE_KEY, JSON.stringify(data)); } catch { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } };
