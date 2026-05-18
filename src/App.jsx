@@ -260,50 +260,9 @@ export default function App(){
   const needsProject=["check","fin","portal","log","finishes"].includes(tab)&&!active;
   const tabLabel={dash:"Project Dashboard",check:active?.name||"Checklist",fin:active?.name||"Financials",subs:"Subcontractors",portal:"Client Portal",log:"Job Log",finishes:"Finishes & Specs"};
 
-  if(!loaded) return (
-    <><style>{CSS}</style>
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16}}>
-      <div style={{color:"var(--gold)",fontFamily:"'Bebas Neue',sans-serif",fontSize:26,letterSpacing:3}}>CHANCE BUILDERS</div>
-      <div style={{color:"var(--muted)",fontSize:13}}>Connecting to database...</div>
-    </div>
-    </>
-  );
+if(!loaded) return (<div><style>{CSS}</style><div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16}}><div style={{color:"var(--gold)",fontFamily:"'Bebas Neue',sans-serif",fontSize:26,letterSpacing:3}}>CHANCE BUILDERS</div><div style={{color:"var(--muted)",fontSize:13}}>Connecting to database...</div></div></div>);
 
-  return (
-    <><style>{CSS}</style>
-    <div className="app">
-      <div className="hdr">
-        <div className="hdr-mark">CB</div>
-        <div>
-          <div className="hdr-title">Chance Builders</div>
-          <div className="hdr-sub" style={{display:"flex",alignItems:"center",gap:5}}>
-            {tabLabel[tab]||""}
-            {saving&&<span style={{fontSize:8,color:"var(--gold)",marginLeft:4}}>● saving</span>}
-          </div>
-        </div>
-        {active&&["check","fin","portal","log","finishes"].includes(tab)&&
-          <button className="hdr-back" onClick={()=>{setActiveId(null);setTab("dash")}}>← Projects</button>}
-      </div>
-      {error&&<div style={{margin:"10px 13px",padding:"10px 13px",background:"rgba(224,82,82,.1)",border:"1px solid rgba(224,82,82,.2)",borderRadius:8,fontSize:12,color:"var(--red)"}}>{error}</div>}
-      {needsProject
-        ?<div style={{padding:40,textAlign:"center"}}><div style={{fontSize:48,marginBottom:14}}>🏗️</div><div style={{color:"var(--muted)",marginBottom:18}}>Select a project first</div><button className="btn" style={{width:"auto",padding:"10px 28px"}} onClick={()=>setTab("dash")}>Go to Dashboard</button></div>
-        :<>
-          {tab==="dash"&&<Dashboard projects={projects} contractors={contractors} onOpen={openProject} onUpdate={setProj} onDelete={removeProject}/>}
-          {tab==="check"&&active&&<Checklist project={active} contractors={contractors} onUpdate={updateActive}/>}
-          {tab==="fin"&&active&&<Financials project={active} onUpdate={updateActive}/>}
-          {tab==="subs"&&<Subs contractors={contractors} onUpdate={setCont}/>}
-          {tab==="portal"&&active&&<Portal project={active} onUpdate={updateActive}/>}
-          {tab==="log"&&active&&<JobLog project={active} onUpdate={updateActive}/>}
-          {tab==="finishes"&&active&&<Finishes project={active} onUpdate={updateActive}/>}
-        </>
-      }
-    </div>
-    <nav className="bnav">
-      {[{id:"dash",l:"Projects",Ic:Ic.Home},{id:"check",l:"Checklist",Ic:Ic.List},{id:"fin",l:"Financials",Ic:Ic.Dollar},{id:"subs",l:"Subs",Ic:Ic.People},{id:"portal",l:"Client",Ic:Ic.Eye},{id:"log",l:"Job Log",Ic:Ic.Log},{id:"finishes",l:"Finishes",Ic:Ic.Palette}]
-        .map(({id,l,Ic:NavIc})=><button key={id} className={`nb${tab===id?" on":""}`} onClick={()=>setTab(id)} style={{fontSize:"8px"}}><NavIc/>{l}</button>)}
-    </nav>
-    </>
-  );
+  return (<div><style>{CSS}</style><div className="app"><div className="hdr"><div className="hdr-mark">CB</div><div><div className="hdr-title">Chance Builders</div><div className="hdr-sub" style={{display:"flex",alignItems:"center",gap:5}}>{tabLabel[tab]||""}{saving&&<span style={{fontSize:8,color:"var(--gold)",marginLeft:4}}>● saving</span>}</div></div>{active&&["check","fin","portal","log","finishes"].includes(tab)&&<button className="hdr-back" onClick={()=>{setActiveId(null);setTab("dash")}}>← Projects</button>}</div>{error&&<div style={{margin:"10px 13px",padding:"10px 13px",background:"rgba(224,82,82,.1)",border:"1px solid rgba(224,82,82,.2)",borderRadius:8,fontSize:12,color:"var(--red)"}}>{error}</div>}{needsProject?<div style={{padding:40,textAlign:"center"}}><div style={{fontSize:48,marginBottom:14}}>🏗️</div><div style={{color:"var(--muted)",marginBottom:18}}>Select a project first</div><button className="btn" style={{width:"auto",padding:"10px 28px"}} onClick={()=>setTab("dash")}>Go to Dashboard</button></div>:<div>{tab==="dash"&&<Dashboard projects={projects} contractors={contractors} onOpen={openProject} onUpdate={setProj} onDelete={removeProject}/>}{tab==="check"&&active&&<Checklist project={active} contractors={contractors} onUpdate={updateActive}/>}{tab==="fin"&&active&&<Financials project={active} onUpdate={updateActive}/>}{tab==="subs"&&<Subs contractors={contractors} onUpdate={setCont}/>}{tab==="portal"&&active&&<Portal project={active} onUpdate={updateActive}/>}{tab==="log"&&active&&<JobLog project={active} onUpdate={updateActive}/>}{tab==="finishes"&&active&&<Finishes project={active} onUpdate={updateActive}/>}</div>}</div><nav className="bnav">{[{id:"dash",l:"Projects",Ic:Ic.Home},{id:"check",l:"Checklist",Ic:Ic.List},{id:"fin",l:"Financials",Ic:Ic.Dollar},{id:"subs",l:"Subs",Ic:Ic.People},{id:"portal",l:"Client",Ic:Ic.Eye},{id:"log",l:"Job Log",Ic:Ic.Log},{id:"finishes",l:"Finishes",Ic:Ic.Palette}].map(({id,l,Ic:NavIc})=><button key={id} className={`nb${tab===id?" on":""}`} onClick={()=>setTab(id)} style={{fontSize:"8px"}}><NavIc/>{l}</button>)}</nav></div>);
 }
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────
