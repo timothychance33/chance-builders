@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-
+import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor } from "./supabase";
 const STORAGE_KEY = "chance_builders_v2";
 const save = async (data) => { try { await window.storage.set(STORAGE_KEY, JSON.stringify(data)); } catch { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } };
 const load = async () => { try { const r = await window.storage.get(STORAGE_KEY); return r ? JSON.parse(r.value) : null; } catch { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null; } };
