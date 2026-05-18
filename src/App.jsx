@@ -266,7 +266,7 @@ export default function App(){
       <div style={{color:"var(--gold)",fontFamily:"'Bebas Neue',sans-serif",fontSize:26,letterSpacing:3}}>CHANCE BUILDERS</div>
       <div style={{color:"var(--muted)",fontSize:13}}>Connecting to database...</div>
     </div>
-    </>;
+    </>
   );
 
   return (
