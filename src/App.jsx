@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor } from "./supabase";
+import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor, signOut } from "./supabase";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const num = (s) => { const v = parseFloat(s); return isNaN(v) ? 0 : v; };
@@ -220,7 +220,7 @@ function Modal({children,onClose,title}){
 }
 
 // ── APP ────────────────────────────────────────────────────────────────────
-export default function App(){
+export default function App({ session }) {
   const [tab,setTab]=useState("dash");
   const [projects,setProjects]=useState([]);
   const [contractors,setContractors]=useState([]);
@@ -283,6 +283,8 @@ export default function App(){
           </div>
           {active&&["check","fin","portal","log","finishes"].includes(tab)&&
             <button className="hdr-back" onClick={()=>{setActiveId(null);setTab("dash")}}>← Projects</button>}
+          {!active&&["check","fin","portal","log","finishes"].includes(tab)===false&&
+            <button className="hdr-back" onClick={()=>signOut()}>Sign Out</button>}
         </div>
         {error&&<div style={{margin:"10px 13px",padding:"10px 13px",background:"rgba(224,82,82,.1)",border:"1px solid rgba(224,82,82,.2)",borderRadius:8,fontSize:12,color:"var(--red)"}}>{error}</div>}
         {needsProject
