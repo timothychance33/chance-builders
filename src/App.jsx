@@ -202,6 +202,7 @@ const Ic = {
   Dots:()=><svg viewBox="0 0 24 24" fill="currentColor" style={{width:15,height:15}}><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>,
   Log:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
   Palette:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><circle cx="8.5" cy="9" r="1.5" fill="currentColor"/><circle cx="15.5" cy="9" r="1.5" fill="currentColor"/><circle cx="12" cy="15" r="1.5" fill="currentColor"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c1.1 0 2-.9 2-2v-1c0-.55.45-1 1-1h1c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8z"/></svg>,
+  Grid:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>,
 };
 
 // ── MODAL WRAPPER ──────────────────────────────────────────────────────────
@@ -255,8 +256,8 @@ export default function App({ session }) {
 
   const active=projects.find(p=>p.id===activeId);
   const openProject=(id)=>{setActiveId(id);setTab("check");};
-  const needsProject=["check","fin","portal","log","finishes"].includes(tab)&&!active;
-  const tabLabel={dash:"Project Dashboard",check:active?.name||"Checklist",fin:active?.name||"Financials",subs:"Subcontractors",portal:"Client Portal",log:"Job Log",finishes:"Finishes & Specs"};
+  const needsProject=["check","fin","log","finishes_more","portal_more"].includes(tab)&&!active;
+  const tabLabel={dash:"Project Dashboard",check:active?.name||"Checklist",fin:active?.name||"Financials",directory:"Directory",log:"Job Log",more:"More"};
 
   if(!loaded) return (
     <div>
@@ -281,10 +282,10 @@ export default function App({ session }) {
               {saving&&<span style={{fontSize:8,color:"var(--gold)",marginLeft:4}}>● saving</span>}
             </div>
           </div>
-          {active&&["check","fin","portal","log","finishes"].includes(tab)&&
-            <button className="hdr-back" onClick={()=>{setActiveId(null);setTab("dash")}}>← Projects</button>}
-          {!active&&["check","fin","portal","log","finishes"].includes(tab)===false&&
-            <button className="hdr-back" onClick={()=>signOut()}>Sign Out</button>}
+        {active&&["check","fin","log"].includes(tab)&&
+          <button className="hdr-back" onClick={()=>{setActiveId(null);setTab("dash")}}>← Projects</button>}
+        {!active&&["check","fin","log"].includes(tab)===false&&tab!=="dash"&&tab!=="directory"&&tab!=="more"&&
+          <button className="hdr-back" onClick={()=>signOut()}>Sign Out</button>}
         </div>
         {error&&<div style={{margin:"10px 13px",padding:"10px 13px",background:"rgba(224,82,82,.1)",border:"1px solid rgba(224,82,82,.2)",borderRadius:8,fontSize:12,color:"var(--red)"}}>{error}</div>}
         {needsProject
@@ -293,15 +294,16 @@ export default function App({ session }) {
             {tab==="dash"&&<Dashboard projects={projects} contractors={contractors} onOpen={openProject} onUpdate={setProj} onDelete={removeProject}/>}
             {tab==="check"&&active&&<Checklist project={active} contractors={contractors} onUpdate={updateActive}/>}
             {tab==="fin"&&active&&<Financials project={active} onUpdate={updateActive}/>}
-            {tab==="subs"&&<Subs contractors={contractors} onUpdate={setCont}/>}
-            {tab==="portal"&&active&&<Portal project={active} onUpdate={updateActive}/>}
+            {tab==="directory"&&<Directory contractors={contractors} onUpdate={setCont}/>}
             {tab==="log"&&active&&<JobLog project={active} onUpdate={updateActive}/>}
-            {tab==="finishes"&&active&&<Finishes project={active} onUpdate={updateActive}/>}
+            {tab==="more"&&<More active={active} projects={projects} onUpdate={setProj} updateActive={updateActive} setTab={setTab} onSignOut={signOut}/>}
+            {tab==="finishes_more"&&active&&<div><div style={{padding:"10px 13px"}}><button className="btg" style={{width:"auto",padding:"7px 14px",marginTop:0}} onClick={()=>setTab("more")}>← Back</button></div><Finishes project={active} onUpdate={updateActive}/></div>}
+            {tab==="portal_more"&&active&&<div><div style={{padding:"10px 13px"}}><button className="btg" style={{width:"auto",padding:"7px 14px",marginTop:0}} onClick={()=>setTab("more")}>← Back</button></div><Portal project={active} onUpdate={updateActive}/></div>}
           </div>
         }
       </div>
       <nav className="bnav">
-        {[{id:"dash",l:"Projects",Ic:Ic.Home},{id:"check",l:"Checklist",Ic:Ic.List},{id:"fin",l:"Financials",Ic:Ic.Dollar},{id:"subs",l:"Subs",Ic:Ic.People},{id:"portal",l:"Client",Ic:Ic.Eye},{id:"log",l:"Job Log",Ic:Ic.Log},{id:"finishes",l:"Finishes",Ic:Ic.Palette}]
+        {[{id:"dash",l:"Projects",Ic:Ic.Home},{id:"check",l:"Checklist",Ic:Ic.List},{id:"fin",l:"Financials",Ic:Ic.Dollar},{id:"directory",l:"Directory",Ic:Ic.People},{id:"log",l:"Job Log",Ic:Ic.Log},{id:"more",l:"More",Ic:Ic.Grid}]
           .map(({id,l,Ic:NavIc})=><button key={id} className={`nb${tab===id?" on":""}`} onClick={()=>setTab(id)} style={{fontSize:"8px"}}><NavIc/>{l}</button>)}
       </nav>
     </div>
@@ -624,10 +626,12 @@ function Financials({project,onUpdate}){
   return (
     <div>
       <div className="tab-row" style={{margin:"10px 13px 0",borderRadius:"8px 8px 0 0",overflow:"hidden",border:"1px solid var(--border)"}}>
-        {["summary","breakdown","change orders"].map(t=>(
-          <div key={t} className={`tab${finTab===t?" on":""}`} onClick={()=>setFinTab(t)} style={{textTransform:"capitalize",fontSize:11}}>{t}</div>
+        {["budget","summary","breakdown","change orders"].map(t=>(
+          <div key={t} className={`tab${finTab===t?" on":""}`} onClick={()=>setFinTab(t)} style={{textTransform:"capitalize",fontSize:10}}>{t}</div>
         ))}
       </div>
+
+      {finTab==="budget"&&<BudgetView project={project} onUpdate={onUpdate}/>}
 
       {finTab==="summary"&&<div className="card" style={{borderRadius:"0 0 12px 12px",marginTop:0}}>
         {/* Sale Price */}
@@ -981,7 +985,88 @@ function SubDetail({sub,onUpdate,BIZ_TYPES,TRADES,wcExpired,wcExpiringSoon}){
   );
 }
 
-// ── JOB LOG ───────────────────────────────────────────────────────────────
+// ── DIRECTORY (Subs + Suppliers) ──────────────────────────────────────────
+function Directory({contractors,onUpdate}){
+  const [view,setView]=useState("subs");
+  return (
+    <div>
+      <div style={{display:"flex",gap:7,padding:"13px 13px 5px"}}>
+        {[["subs","👷 Subcontractors"],["suppliers","📦 Suppliers"]].map(([m,l])=>(
+          <button key={m} onClick={()=>setView(m)} style={{flex:1,padding:"8px",border:`1px solid ${view===m?"var(--gold)":"var(--border)"}`,borderRadius:8,background:view===m?"rgba(200,164,86,.1)":"var(--card2)",color:view===m?"var(--gold)":"var(--muted)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:500,cursor:"pointer"}}>{l}</button>
+        ))}
+      </div>
+      {view==="subs"&&<Subs contractors={contractors} onUpdate={onUpdate}/>}
+      {view==="suppliers"&&<Suppliers contractors={contractors} onUpdate={onUpdate}/>}
+    </div>
+  );
+}
+
+function Suppliers({contractors,onUpdate}){
+  const suppliers=(contractors||[]).filter(c=>c.isSupplier);
+  const EMPTY={name:"",category:"",repName:"",phone:"",email:"",accountNum:"",creditTerms:"",leadTime:"",notes:"",isSupplier:true};
+  const [modal,setModal]=useState(false);
+  const [form,setForm]=useState(EMPTY);
+  const [search,setSearch]=useState("");
+  const CATS=["Lumber / Building Materials","Concrete & Masonry","Plumbing Supply","Electrical Supply","HVAC Supply","Flooring","Cabinetry & Millwork","Countertops","Brick & Stone","Roofing Materials","Hardware & Fasteners","Paint & Finishes","Windows & Doors","Landscaping & Sod","Other"];
+
+  const add=()=>{
+    if(!form.name.trim()) return;
+    onUpdate([...contractors,{id:uid(),...form,createdAt:new Date().toISOString()}],{id:uid(),...form},null);
+    setModal(false);setForm(EMPTY);
+  };
+  const del=(id)=>{if(confirm("Remove this supplier?"))onUpdate(contractors.filter(c=>c.id!==id),null,id);};
+  const filtered=suppliers.filter(c=>(c.name+c.category+c.repName).toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 13px 7px"}}>
+        <div style={{fontSize:12,color:"var(--muted)"}}>{suppliers.length} suppliers</div>
+        <button className="btn" style={{width:"auto",padding:"7px 13px",fontSize:12}} onClick={()=>setModal(true)}>+ Add Supplier</button>
+      </div>
+      <div style={{padding:"0 13px 9px"}}><input className="inp" placeholder="Search suppliers..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
+      {filtered.length===0&&<div className="card" style={{textAlign:"center",padding:28,color:"var(--muted)",fontSize:12}}>{suppliers.length===0?"No suppliers added yet.":"No results."}</div>}
+      {filtered.map(c=>(
+        <div key={c.id} className="card" style={{padding:13}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:600,fontSize:14}}>{c.name}</div>
+              <span className="tag tgo" style={{marginTop:4,display:"inline-block"}}>{c.category||"General"}</span>
+              {c.repName&&<div style={{fontSize:12,color:"var(--muted)",marginTop:6}}>Rep: {c.repName}</div>}
+              {c.phone&&<div style={{display:"flex",alignItems:"center",gap:5,marginTop:5,fontSize:12,color:"var(--muted)"}}><Ic.Phone/><a href={`tel:${c.phone}`} style={{color:"var(--text)",textDecoration:"none"}}>{c.phone}</a></div>}
+              {c.email&&<div style={{fontSize:11,color:"var(--muted)",marginTop:3}}>{c.email}</div>}
+              {c.accountNum&&<div style={{fontSize:11,color:"var(--muted)",marginTop:3}}>Account #: <b style={{color:"var(--text)"}}>{c.accountNum}</b></div>}
+              <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
+                {c.creditTerms&&<span className="tag tb" style={{fontSize:9}}>{c.creditTerms}</span>}
+                {c.leadTime&&<span className="tag tm" style={{fontSize:9}}>Lead: {c.leadTime}</span>}
+              </div>
+              {c.notes&&<div style={{fontSize:11,color:"var(--muted)",marginTop:5,fontStyle:"italic"}}>{c.notes}</div>}
+            </div>
+            <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer"}} onClick={()=>del(c.id)}><Ic.Trash/></button>
+          </div>
+        </div>
+      ))}
+      {modal&&<Modal title="Add Supplier" onClose={()=>setModal(false)}>
+        <div className="fld"><label className="lbl">Company Name *</label><input className="inp" placeholder="e.g. Bossier Lumber Co." value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">Category</label><select className="inp" value={form.category} onChange={e=>setForm({...form,category:e.target.value})}><option value="">— Select Category —</option>{CATS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+        <div className="row2" style={{gap:8,marginBottom:12}}>
+          <div><label className="lbl">Rep Name</label><input className="inp" placeholder="John Smith" value={form.repName} onChange={e=>setForm({...form,repName:e.target.value})}/></div>
+          <div><label className="lbl">Phone</label><input className="inp" type="tel" placeholder="(318) 555-0100" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></div>
+        </div>
+        <div className="fld"><label className="lbl">Email</label><input className="inp" type="email" placeholder="rep@supplier.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></div>
+        <div className="row2" style={{gap:8,marginBottom:12}}>
+          <div><label className="lbl">Account #</label><input className="inp" placeholder="e.g. CB-10042" value={form.accountNum} onChange={e=>setForm({...form,accountNum:e.target.value})}/></div>
+          <div><label className="lbl">Credit Terms</label><input className="inp" placeholder="e.g. Net 30" value={form.creditTerms} onChange={e=>setForm({...form,creditTerms:e.target.value})}/></div>
+        </div>
+        <div className="fld"><label className="lbl">Delivery Lead Time</label><input className="inp" placeholder="e.g. 3-5 business days" value={form.leadTime} onChange={e=>setForm({...form,leadTime:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">Notes</label><textarea className="inp" rows={2} placeholder="Pricing notes, delivery info, etc." value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} style={{resize:"vertical"}}/></div>
+        <button className="btn" onClick={add}>Add Supplier</button>
+        <button className="btg" onClick={()=>setModal(false)}>Cancel</button>
+      </Modal>}
+    </div>
+  );
+}
+
+
 function JobLog({project,onUpdate}){
   const [modal,setModal]=useState(false);
   const [form,setForm]=useState({note:"",weather:"",crew:"",date:today()});
@@ -1362,5 +1447,308 @@ function FinishDetail({finish,CATS,onSave,onClose}){
       <button className="btn" onClick={()=>onSave(d)}>Save Changes</button>
       <button className="btg" onClick={onClose}>Cancel</button>
     </>
+  );
+}
+
+// ── MORE SCREEN ────────────────────────────────────────────────────────────
+function More({active,projects,onUpdate,updateActive,setTab,onSignOut}){
+  const [editModal,setEditModal]=useState(false);
+  const [selProject,setSelProject]=useState(null);
+
+  const menuItems=[
+    {icon:"🎨",label:"Finishes & Specs",desc:"Paint colors, materials, product specs",action:()=>setTab("finishes_more"),needsProject:true},
+    {icon:"👁️",label:"Client Portal",desc:"View client progress & selections",action:()=>setTab("portal_more"),needsProject:true},
+    {icon:"✏️",label:"Edit Project Details",desc:"Name, address, sale price, client info",action:()=>{setSelProject(active);setEditModal(true);},needsProject:true},
+  ];
+
+  return (
+    <div>
+      <div className="sec">More</div>
+      {active&&<div style={{margin:"0 13px 10px",padding:"10px 13px",background:"var(--card2)",border:"1px solid var(--border)",borderRadius:8,fontSize:12,color:"var(--muted)"}}>
+        Current project: <b style={{color:"var(--gold)"}}>{active.name}</b>
+      </div>}
+      <div className="card" style={{padding:0,overflow:"hidden"}}>
+        {menuItems.map((item,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",borderBottom:"1px solid var(--border)",cursor:item.needsProject&&!active?"default":"pointer",opacity:item.needsProject&&!active?.5:1}} onClick={item.needsProject&&!active?null:item.action}>
+            <span style={{fontSize:24,flexShrink:0}}>{item.icon}</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:14,fontWeight:500,color:"var(--text)"}}>{item.label}</div>
+              <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{item.needsProject&&!active?"Select a project first":item.desc}</div>
+            </div>
+            <span style={{color:"var(--muted)",fontSize:16}}>›</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="sec" style={{marginTop:8}}>Projects</div>
+      <div className="card" style={{padding:0,overflow:"hidden"}}>
+        {projects.map(p=>(
+          <div key={p.id} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",borderBottom:"1px solid var(--border)",cursor:"pointer"}} onClick={()=>{setSelProject(p);setEditModal(true);}}>
+            <span style={{fontSize:20}}>🏠</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:500}}>{p.name}</div>
+              {p.address&&<div style={{fontSize:11,color:"var(--muted)",marginTop:1}}>{p.address}</div>}
+            </div>
+            <span style={{fontSize:11,color:"var(--gold)"}}>Edit ›</span>
+          </div>
+        ))}
+        {projects.length===0&&<div style={{padding:"20px 16px",fontSize:12,color:"var(--muted)",textAlign:"center"}}>No projects yet</div>}
+      </div>
+
+      <div style={{margin:"20px 13px 0"}}>
+        <button onClick={onSignOut} style={{width:"100%",padding:"12px",background:"transparent",border:"1px solid rgba(224,82,82,.3)",borderRadius:8,color:"var(--red)",fontFamily:"'DM Sans',sans-serif",fontSize:13,cursor:"pointer",fontWeight:500}}>
+          Sign Out
+        </button>
+      </div>
+
+      {editModal&&selProject&&<Modal title="Edit Project" onClose={()=>{setEditModal(false);setSelProject(null);}}>
+        <EditProject
+          project={selProject}
+          onSave={(updated)=>{
+            onUpdate(projects.map(p=>p.id===updated.id?updated:p),updated);
+            setEditModal(false);setSelProject(null);
+          }}
+          onClose={()=>{setEditModal(false);setSelProject(null);}}
+        />
+      </Modal>}
+    </div>
+  );
+}
+
+// ── EDIT PROJECT ───────────────────────────────────────────────────────────
+function EditProject({project,onSave,onClose}){
+  const [form,setForm]=useState({
+    name:project.name||"",
+    address:project.address||"",
+    salePrice:project.salePrice||"",
+    markupPct:project.markupPct||"10",
+    startDate:project.startDate||"",
+    type:project.type||"custom",
+    clientName:project.clientName||"",
+    clientEmail:project.clientEmail||"",
+  });
+
+  const save=()=>{
+    if(!form.name.trim()) return;
+    onSave({...project,...form});
+  };
+
+  return (
+    <>
+      <div className="fld"><label className="lbl">Project Name *</label><input className="inp" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Address</label><input className="inp" placeholder="Street address" value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Contract / Sale Price ($)</label><input className="inp" type="number" placeholder="e.g. 750000" value={form.salePrice} onChange={e=>setForm({...form,salePrice:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Builder's Premium / Markup %</label><input className="inp" type="number" placeholder="10" value={form.markupPct} onChange={e=>setForm({...form,markupPct:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Target Start Date</label><input className="inp" type="date" value={form.startDate} onChange={e=>setForm({...form,startDate:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Build Type</label><select className="inp" value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option value="custom">Custom (Client Build)</option><option value="spec">Spec House</option></select></div>
+      <div className="div"/>
+      <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:9}}>Client Portal</div>
+      <div className="fld"><label className="lbl">Client Name</label><input className="inp" placeholder="John & Jane Smith" value={form.clientName} onChange={e=>setForm({...form,clientName:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Client Email</label><input className="inp" type="email" placeholder="client@email.com" value={form.clientEmail} onChange={e=>setForm({...form,clientEmail:e.target.value})}/></div>
+      <div style={{padding:"9px 12px",background:"var(--card2)",borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <span style={{fontSize:11,color:"var(--muted)"}}>Client Portal PIN</span>
+        <span style={{fontFamily:"monospace",fontSize:15,color:"var(--gold)",letterSpacing:2}}>{project.clientPin||"——"}</span>
+      </div>
+      <button className="btn" onClick={save}>Save Changes</button>
+      <button className="btg" onClick={onClose}>Cancel</button>
+    </>
+  );
+}
+
+// ── BUDGET VIEW ────────────────────────────────────────────────────────────
+function BudgetView({project,onUpdate}){
+  const [openPhase,setOpenPhase]=useState(null);
+  const [editTask,setEditTask]=useState(null); // {phIdx, tIdx}
+  const [draft,setDraft]=useState(null);
+
+  const updateTask=(phIdx,tIdx,updates)=>{
+    const phases=project.phases.map((ph,pi)=>pi!==phIdx?ph:{
+      ...ph,tasks:ph.tasks.map((t,ti)=>ti!==tIdx?t:{...t,...updates})
+    });
+    onUpdate({...project,phases});
+  };
+
+  const openEdit=(phIdx,tIdx)=>{
+    const t=project.phases[phIdx].tasks[tIdx];
+    setDraft({
+      estimate:t.estimate||"",
+      bid:t.bid||"",
+      actual:t.actual||"",
+      contractorId:t.contractorId||null,
+      notes:t.notes||"",
+      lineItems:[...(t.lineItems||[])],
+    });
+    setEditTask({phIdx,tIdx});
+  };
+
+  const saveEdit=()=>{
+    updateTask(editTask.phIdx,editTask.tIdx,draft);
+    setEditTask(null);setDraft(null);
+  };
+
+  const addLI=()=>setDraft({...draft,lineItems:[...draft.lineItems,{id:uid(),description:"",labor:"",material:""}]});
+  const updLI=(id,k,v)=>setDraft({...draft,lineItems:draft.lineItems.map(li=>li.id===id?{...li,[k]:v}:li)});
+  const delLI=(id)=>setDraft({...draft,lineItems:draft.lineItems.filter(li=>li.id!==id)});
+
+  // Phase totals
+  const phaseTotal=(ph)=>{
+    const lis=ph.tasks.flatMap(t=>t.lineItems||[]);
+    const fromLI=lis.reduce((s,li)=>s+num(li.labor)+num(li.material),0);
+    const fromFields=ph.tasks.reduce((s,t)=>s+num(t.estimate),0);
+    return fromLI||fromFields;
+  };
+
+  const grandEstimate=project.phases.reduce((s,ph)=>s+ph.tasks.reduce((ss,t)=>ss+num(t.estimate),0),0);
+  const grandBid=project.phases.reduce((s,ph)=>s+ph.tasks.reduce((ss,t)=>ss+num(t.bid),0),0);
+  const grandActual=project.phases.reduce((s,ph)=>s+ph.tasks.flatMap(t=>t.lineItems||[]).reduce((ss,li)=>ss+num(li.labor)+num(li.material),0),0)||
+    project.phases.reduce((s,ph)=>s+ph.tasks.reduce((ss,t)=>ss+num(t.actual),0),0);
+
+  return (
+    <div>
+      {/* Grand totals bar */}
+      <div className="card" style={{borderRadius:"0 0 12px 12px",marginTop:0,padding:"12px 14px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+          {[{l:"Est. Total",v:grandEstimate,c:"var(--text)"},{l:"Bid Total",v:grandBid,c:"var(--blue)"},{l:"Actual Total",v:grandActual,c:grandActual>grandEstimate&&grandEstimate?"var(--red)":grandActual?"var(--green)":"var(--text)"}].map(({l,v,c})=>(
+            <div key={l} className="c2" style={{padding:"8px 10px",textAlign:"center"}}>
+              <div style={{fontSize:9,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px",marginBottom:3}}>{l}</div>
+              <div style={{fontSize:15,fontWeight:700,color:c}}>{v?fmt(v):"—"}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{fontSize:10,color:"var(--muted)",padding:"10px 16px 4px",letterSpacing:".5px",textTransform:"uppercase"}}>
+        Tap any task to enter estimate · bid · actual
+      </div>
+
+      {/* Phase accordions */}
+      {project.phases.map((ph,phIdx)=>{
+        const isOpen=openPhase===phIdx;
+        const total=phaseTotal(ph);
+        const taskEstimate=ph.tasks.reduce((s,t)=>s+num(t.estimate),0);
+        const taskBid=ph.tasks.reduce((s,t)=>s+num(t.bid),0);
+        const taskActual=ph.tasks.flatMap(t=>t.lineItems||[]).reduce((s,li)=>s+num(li.labor)+num(li.material),0)||
+          ph.tasks.reduce((s,t)=>s+num(t.actual),0);
+
+        return (
+          <div key={ph.id} style={{marginBottom:1}}>
+            <div className="ph" onClick={()=>setOpenPhase(isOpen?null:phIdx)}>
+              <span style={{fontSize:19}}>{ph.icon}</span>
+              <div style={{flex:1}}>
+                <div className="phn">{ph.short||ph.name}</div>
+                {(taskEstimate||taskBid||taskActual)>0&&(
+                  <div style={{display:"flex",gap:10,marginTop:3}}>
+                    {taskEstimate>0&&<span style={{fontSize:9,color:"var(--muted)"}}>Est: <b style={{color:"var(--text)"}}>{fmt(taskEstimate)}</b></span>}
+                    {taskBid>0&&<span style={{fontSize:9,color:"var(--muted)"}}>Bid: <b style={{color:"var(--blue)"}}>{fmt(taskBid)}</b></span>}
+                    {taskActual>0&&<span style={{fontSize:9,color:"var(--muted)"}}>Act: <b style={{color:"var(--green)"}}>{fmt(taskActual)}</b></span>}
+                  </div>
+                )}
+              </div>
+              <Ic.Chev u={isOpen}/>
+            </div>
+
+            {isOpen&&(
+              <div style={{background:"var(--card)",borderBottom:"1px solid var(--border)"}}>
+                {/* Column headers */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 72px 72px 72px 24px",gap:4,padding:"6px 14px",borderBottom:"1px solid var(--border)",background:"var(--card2)"}}>
+                  <div style={{fontSize:9,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>Task</div>
+                  <div style={{fontSize:9,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px",textAlign:"right"}}>Estimate</div>
+                  <div style={{fontSize:9,color:"var(--blue)",textTransform:"uppercase",letterSpacing:".4px",textAlign:"right"}}>Bid</div>
+                  <div style={{fontSize:9,color:"var(--green)",textTransform:"uppercase",letterSpacing:".4px",textAlign:"right"}}>Actual</div>
+                  <div/>
+                </div>
+
+                {ph.tasks.filter(t=>!t.na).map((task,tIdx)=>{
+                  const liActual=(task.lineItems||[]).reduce((s,li)=>s+num(li.labor)+num(li.material),0);
+                  const actual=liActual||num(task.actual);
+                  const variance=actual-num(task.estimate);
+                  return (
+                    <div key={task.id} style={{display:"grid",gridTemplateColumns:"1fr 72px 72px 72px 24px",gap:4,padding:"8px 14px",borderBottom:"1px solid var(--border)",alignItems:"center",cursor:"pointer"}}
+                      onClick={()=>openEdit(phIdx,tIdx)}>
+                      <div>
+                        <div style={{fontSize:12,lineHeight:1.3,color:task.completed?"var(--muted)":"var(--text)"}}>{task.name}</div>
+                        {task.contractorId&&(()=>{const c=null; return null;})()}
+                      </div>
+                      <div style={{fontSize:12,textAlign:"right",color:"var(--text)",fontWeight:num(task.estimate)?"600":"400"}}>{num(task.estimate)?fmt(task.estimate):<span style={{color:"var(--border)"}}>—</span>}</div>
+                      <div style={{fontSize:12,textAlign:"right",color:"var(--blue)",fontWeight:num(task.bid)?"600":"400"}}>{num(task.bid)?fmt(task.bid):<span style={{color:"var(--border)"}}>—</span>}</div>
+                      <div style={{fontSize:12,textAlign:"right",color:variance>0&&num(task.estimate)?"var(--red)":actual?"var(--green)":"var(--muted)",fontWeight:actual?"600":"400"}}>{actual?fmt(actual):<span style={{color:"var(--border)"}}>—</span>}</div>
+                      <div style={{color:"var(--muted)",fontSize:12,textAlign:"center"}}>›</div>
+                    </div>
+                  );
+                })}
+
+                {/* Phase subtotal */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 72px 72px 72px 24px",gap:4,padding:"8px 14px",background:"var(--card2)"}}>
+                  <div style={{fontSize:10,color:"var(--gold)",textTransform:"uppercase",letterSpacing:".4px",fontWeight:600}}>Phase Total</div>
+                  <div style={{fontSize:12,textAlign:"right",color:"var(--text)",fontWeight:700}}>{taskEstimate?fmt(taskEstimate):"—"}</div>
+                  <div style={{fontSize:12,textAlign:"right",color:"var(--blue)",fontWeight:700}}>{taskBid?fmt(taskBid):"—"}</div>
+                  <div style={{fontSize:12,textAlign:"right",color:"var(--green)",fontWeight:700}}>{taskActual?fmt(taskActual):"—"}</div>
+                  <div/>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Task edit modal */}
+      {editTask&&draft&&(()=>{
+        const task=project.phases[editTask.phIdx].tasks[editTask.tIdx];
+        const liTotal=draft.lineItems.reduce((s,li)=>s+num(li.labor)+num(li.material),0);
+        return (
+          <Modal title={task.name} onClose={()=>{setEditTask(null);setDraft(null);}}>
+            <div className="tab-row">
+              {["quick","line items"].map(t=>{
+                const [activeSubTab,setActiveSubTab]=[draft._subtab||"quick",(v)=>setDraft({...draft,_subtab:v})];
+                return <div key={t} className={`tab${activeSubTab===t?" on":""}`} onClick={()=>setActiveSubTab(t)} style={{textTransform:"capitalize"}}>{t}</div>;
+              })}
+            </div>
+
+            {(draft._subtab||"quick")==="quick"&&<>
+              <div className="row3" style={{gap:8,marginBottom:12}}>
+                {[{l:"Your Estimate ($)",k:"estimate"},{l:"Sub's Bid ($)",k:"bid"},{l:"Actual Cost ($)",k:"actual"}].map(({l,k})=>(
+                  <div key={k}><label className="lbl">{l}</label><input className="inp" type="number" placeholder="0" value={draft[k]} onChange={e=>setDraft({...draft,[k]:e.target.value})} style={{fontSize:13,padding:"8px 10px"}}/></div>
+                ))}
+              </div>
+              {num(draft.estimate)>0&&num(draft.bid)>0&&(
+                <div style={{fontSize:11,marginBottom:8}}>
+                  Bid vs Estimate: <b style={{color:num(draft.bid)>num(draft.estimate)?"var(--red)":"var(--green)"}}>
+                    {num(draft.bid)>num(draft.estimate)?"+":""}{fmt(num(draft.bid)-num(draft.estimate))}
+                  </b>
+                </div>
+              )}
+              <div className="fld">
+                <label className="lbl">Notes</label>
+                <textarea className="inp" rows={2} placeholder="Sub name, material specs, anything relevant..." value={draft.notes} onChange={e=>setDraft({...draft,notes:e.target.value})} style={{resize:"vertical"}}/>
+              </div>
+            </>}
+
+            {(draft._subtab||"quick")==="line items"&&<>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:11,color:"var(--muted)"}}>Total: <b style={{color:"var(--text)",fontSize:13}}>{fmt(liTotal)}</b></div>
+                <button className="bto" style={{fontSize:11,padding:"5px 10px"}} onClick={addLI}>+ Line Item</button>
+              </div>
+              {draft.lineItems.length===0&&<div style={{fontSize:12,color:"var(--muted)",textAlign:"center",padding:"16px 0"}}>No line items. Add vendors, materials, labor separately for detailed tracking.</div>}
+              {draft.lineItems.map(li=>(
+                <div key={li.id} className="c2" style={{marginBottom:8}}>
+                  <div style={{display:"flex",gap:6,marginBottom:6,alignItems:"center"}}>
+                    <input className="inp" placeholder="Description (e.g. Pump truck, concrete, labor)" value={li.description} onChange={e=>updLI(li.id,"description",e.target.value)} style={{flex:1,fontSize:12,padding:"7px 9px"}}/>
+                    <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",flexShrink:0}} onClick={()=>delLI(li.id)}><Ic.Trash/></button>
+                  </div>
+                  <div className="row2">
+                    <div><label className="lbl">Labor ($)</label><input className="inp" type="number" placeholder="0" value={li.labor} onChange={e=>updLI(li.id,"labor",e.target.value)} style={{fontSize:12,padding:"7px 9px"}}/></div>
+                    <div><label className="lbl">Materials ($)</label><input className="inp" type="number" placeholder="0" value={li.material} onChange={e=>updLI(li.id,"material",e.target.value)} style={{fontSize:12,padding:"7px 9px"}}/></div>
+                  </div>
+                  <div style={{fontSize:10,color:"var(--muted)",marginTop:4,textAlign:"right"}}>Subtotal: <b style={{color:"var(--text)"}}>{fmt(num(li.labor)+num(li.material))}</b></div>
+                </div>
+              ))}
+            </>}
+
+            <button className="btn" style={{marginTop:8}} onClick={saveEdit}>Save</button>
+            <button className="btg" onClick={()=>{setEditTask(null);setDraft(null);}}>Cancel</button>
+          </Modal>
+        );
+      })()}
+    </div>
   );
 }
