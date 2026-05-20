@@ -585,10 +585,14 @@ function Checklist({project,contractors,onUpdate}){
 function Financials({project,onUpdate}){
   const [coModal,setCoModal]=useState(false);
   const [coForm,setCoForm]=useState({description:"",amount:"",reason:"",date:"",status:"draft"});
+  const [finModal,setFinModal]=useState(false);
+  const [finForm,setFinForm]=useState({description:"",amount:"",date:"",type:"construction"});
   const [editSale,setEditSale]=useState(false);
   const [saleInput,setSaleInput]=useState(project.salePrice||"");
   const [markupInput,setMarkupInput]=useState(project.markupPct||"10");
   const [editMarkup,setEditMarkup]=useState(false);
+  const [editLot,setEditLot]=useState(false);
+  const [lotInput,setLotInput]=useState(project.lotCost||"");
   const [finTab,setFinTab]=useState("summary");
 
   const tasks=project.phases.flatMap(ph=>ph.tasks);
@@ -599,7 +603,10 @@ function Financials({project,onUpdate}){
   const cos=project.changeOrders||[];
   const approvedCOs=cos.filter(co=>co.status==="approved"||co.status==="complete").reduce((s,co)=>s+num(co.amount),0);
   const markup=hardCost*(num(project.markupPct||10)/100);
-  const totalCost=hardCost+markup+approvedCOs;
+  const lotCost=num(project.lotCost||0);
+  const financingEntries=project.financingCosts||[];
+  const financingTotal=financingEntries.reduce((s,f)=>s+num(f.amount),0);
+  const totalCost=lotCost+hardCost+markup+approvedCOs+financingTotal;
   const sale=num(project.salePrice);
   const margin=sale-totalCost;
   const marginPct=sale?((margin/sale)*100).toFixed(1):0;
@@ -613,6 +620,13 @@ function Financials({project,onUpdate}){
   };
   const updateCOStatus=(id,status)=>onUpdate({...project,changeOrders:cos.map(co=>co.id===id?{...co,status}:co)});
   const deleteCO=(id)=>onUpdate({...project,changeOrders:cos.filter(co=>co.id!==id)});
+
+  const addFin=()=>{
+    if(!finForm.description||!finForm.amount) return;
+    onUpdate({...project,financingCosts:[...financingEntries,{id:uid(),...finForm,createdAt:new Date().toISOString()}]});
+    setFinModal(false);setFinForm({description:"",amount:"",date:"",type:"construction"});
+  };
+  const deleteFin=(id)=>onUpdate({...project,financingCosts:financingEntries.filter(f=>f.id!==id)});
 
   const COStatusColors={draft:"var(--muted)",presented:"var(--blue)",approved:"var(--green)",complete:"var(--gold)"};
   const COStatusLabels={draft:"Draft",presented:"Presented",approved:"Approved",complete:"Complete"};
@@ -642,20 +656,57 @@ function Financials({project,onUpdate}){
         </div>
         <div style={{fontSize:24,fontWeight:600,color:"var(--gold)",marginBottom:12}}>{sale?fmt(sale):"Not set"}</div>
 
-        {[{l:"Labor Costs",v:laborTotal,c:"var(--text)"},{l:"Material Costs",v:matTotal,c:"var(--text)"},{l:"Hard Cost Total",v:hardCost,c:"var(--text)",bold:true},{l:`Builder's Premium (${project.markupPct||10}%)`,v:markup,c:"var(--gold)"},{l:`Approved Change Orders`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},{l:"Total Project Cost",v:totalCost,c:"var(--text)",bold:true},{l:"Paid to Subs",v:paidToDate,c:"var(--blue)"}].map(({l,v,c,bold})=>(
+        {/* P&L rows */}
+        {[
+          {l:"Lot / Land Cost",v:lotCost,c:"var(--text)",edit:true},
+          {l:"Labor Costs",v:laborTotal,c:"var(--text)"},
+          {l:"Material Costs",v:matTotal,c:"var(--text)"},
+          {l:"Hard Cost Total",v:hardCost,c:"var(--text)",bold:true},
+          {l:`Builder's Premium (${project.markupPct||10}%)`,v:markup,c:"var(--gold)"},
+          {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
+          {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
+          {l:"Total Project Cost",v:totalCost,c:"var(--text)",bold:true},
+          {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
+        ].map(({l,v,c,bold,edit})=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid var(--border)"}}>
             <span style={{fontSize:12,color:"var(--muted)"}}>{l}</span>
-            <span style={{fontSize:13,fontWeight:bold?700:600,color:c}}>{fmt(v)}</span>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              {edit&&!editLot&&<button className="bto" style={{fontSize:10,padding:"2px 7px"}} onClick={()=>{setLotInput(project.lotCost||"");setEditLot(true);}}>Edit</button>}
+              {edit&&editLot&&<div style={{display:"flex",gap:4}}><input className="inp" type="number" value={lotInput} onChange={e=>setLotInput(e.target.value)} style={{width:90,padding:"3px 7px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"3px 9px",fontSize:11}} onClick={()=>{onUpdate({...project,lotCost:lotInput});setEditLot(false);}}>Save</button></div>}
+              <span style={{fontSize:13,fontWeight:bold?700:600,color:c}}>{fmt(v)}</span>
+            </div>
           </div>
         ))}
 
         {/* Markup edit */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingBottom:8,borderBottom:"1px solid var(--border)"}}>
           <span style={{fontSize:11,color:"var(--muted)"}}>Adjust markup %</span>
           {!editMarkup?<button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={()=>{setMarkupInput(project.markupPct||"10");setEditMarkup(true);}}>Edit</button>
             :<div style={{display:"flex",gap:5}}><input className="inp" type="number" value={markupInput} onChange={e=>setMarkupInput(e.target.value)} style={{width:70,padding:"4px 8px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"4px 10px",fontSize:11}} onClick={()=>{onUpdate({...project,markupPct:markupInput});setEditMarkup(false);}}>Save</button></div>}
         </div>
 
+        {/* Financing costs section */}
+        <div style={{marginTop:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>Financing Costs</div>
+            <button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={()=>setFinModal(true)}>+ Add</button>
+          </div>
+          {financingEntries.length===0&&<div style={{fontSize:11,color:"var(--muted)",fontStyle:"italic",marginBottom:8}}>No financing costs logged yet</div>}
+          {financingEntries.map(f=>(
+            <div key={f.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid var(--border)"}}>
+              <div>
+                <div style={{fontSize:12,color:"var(--text)"}}>{f.description}</div>
+                <div style={{fontSize:10,color:"var(--muted)"}}>{f.type==="construction"?"Construction Loan":"Lot Loan"}{f.date?` · ${f.date}`:""}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:13,fontWeight:600,color:"var(--red)"}}>{fmt(f.amount)}</span>
+                <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer"}} onClick={()=>deleteFin(f.id)}><Ic.Trash/></button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Margin */}
         <div style={{marginTop:11,padding:12,background:margin>=0?"rgba(77,187,120,.08)":"rgba(224,82,82,.08)",border:`1px solid ${margin>=0?"rgba(77,187,120,.2)":"rgba(224,82,82,.2)"}`,borderRadius:8,textAlign:"center"}}>
           <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:3}}>{sale?"Projected Margin":"Set sale price to see margin"}</div>
           {sale&&<><div style={{fontSize:26,fontWeight:700,color:margin>=0?"var(--green)":"var(--red)"}}>{fmt(margin)}</div><div style={{fontSize:12,color:margin>=0?"var(--green)":"var(--red)",marginTop:2}}>{marginPct}% margin</div></>}
@@ -722,6 +773,21 @@ function Financials({project,onUpdate}){
         </div>
         <button className="btn" onClick={addCO}>Add Change Order</button>
         <button className="btg" onClick={()=>setCoModal(false)}>Cancel</button>
+      </Modal>}
+
+      {finModal&&<Modal title="Add Financing Cost" onClose={()=>setFinModal(false)}>
+        <div className="fld"><label className="lbl">Description *</label><input className="inp" placeholder="e.g. Construction Loan Interest — May 2025" value={finForm.description} onChange={e=>setFinForm({...finForm,description:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">Amount ($) *</label><input className="inp" type="number" placeholder="e.g. 1850" value={finForm.amount} onChange={e=>setFinForm({...finForm,amount:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">Type</label>
+          <select className="inp" value={finForm.type} onChange={e=>setFinForm({...finForm,type:e.target.value})}>
+            <option value="construction">Construction Loan Interest</option>
+            <option value="lot">Lot Loan Interest</option>
+            <option value="other">Other Financing Cost</option>
+          </select>
+        </div>
+        <div className="fld"><label className="lbl">Date</label><input className="inp" type="date" value={finForm.date} onChange={e=>setFinForm({...finForm,date:e.target.value})}/></div>
+        <button className="btn" onClick={addFin}>Add Financing Cost</button>
+        <button className="btg" onClick={()=>setFinModal(false)}>Cancel</button>
       </Modal>}
     </div>
   );
