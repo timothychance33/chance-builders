@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor, signOut } from "./supabase";
+import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor, signOut, uploadPaymentAttachment, signedUrlFor, removePaymentAttachment } from "./supabase";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const num = (s) => { const v = parseFloat(s); return isNaN(v) ? 0 : v; };
@@ -325,6 +325,15 @@ select.inp option{background:#1c2230}
 .tab-row{display:flex;border-bottom:1px solid var(--border);margin-bottom:14px}
 .tab{flex:1;padding:9px 4px;text-align:center;font-size:12px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
 .tab.on{color:var(--gold);border-bottom-color:var(--gold)}
+.rcpt-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;align-items:flex-start}
+.rcpt-th{width:56px;height:56px;border-radius:6px;object-fit:cover;border:1px solid var(--border);cursor:pointer;background:var(--card);display:block}
+.rcpt-ph{width:56px;height:56px;border-radius:6px;border:1px solid var(--border);background:var(--card);flex-shrink:0}
+.rcpt-chip{display:inline-flex;align-items:center;gap:5px;max-width:160px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--card);font-size:10px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;text-align:left;line-height:1.3}
+.rcpt-wrap{position:relative;flex-shrink:0}
+.rcpt-del{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:1px solid var(--border);background:var(--card2);color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+.rcpt-del svg{width:10px;height:10px}
+.rcpt-add{display:inline-flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer}
+.rcpt-add input{display:none}
 `;
 
 // ── ICONS ──────────────────────────────────────────────────────────────────
@@ -345,6 +354,7 @@ const Ic = {
   Log:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
   Palette:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><circle cx="8.5" cy="9" r="1.5" fill="currentColor"/><circle cx="15.5" cy="9" r="1.5" fill="currentColor"/><circle cx="12" cy="15" r="1.5" fill="currentColor"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c1.1 0 2-.9 2-2v-1c0-.55.45-1 1-1h1c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8z"/></svg>,
   Grid:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>,
+  Cam:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{width:14,height:14}}><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>,
 };
 
 // ── MODAL WRAPPER ──────────────────────────────────────────────────────────
@@ -358,6 +368,34 @@ function Modal({children,onClose,title}){
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+const isPreviewableImage = (mime) => !!mime && mime.startsWith("image/") && !/heic|heif/i.test(mime);
+const isPdf = (att) => (att.mime||"") === "application/pdf" || /\.pdf$/i.test(att.name||"");
+
+function ReceiptThumb({att, onOpen, onDelete}){
+  const [url,setUrl]=useState(null);
+  useEffect(()=>{
+    if(!isPreviewableImage(att.mime)) return;
+    let cancelled=false;
+    signedUrlFor(att.path).then(u=>{ if(!cancelled) setUrl(u); }).catch(()=>{});
+    return ()=>{ cancelled=true; };
+  },[att.path, att.mime]);
+  const label=(att.name||"file").length>22?(att.name||"file").slice(0,20)+"…":(att.name||"file");
+  return (
+    <div className="rcpt-wrap">
+      {isPreviewableImage(att.mime)
+        ? (url
+            ? <img className="rcpt-th" src={url} alt={att.name||"Receipt"} onClick={()=>onOpen(att)}/>
+            : <div className="rcpt-ph"/>)
+        : <button type="button" className="rcpt-chip" onClick={()=>onOpen(att)} title={att.name}>
+            <span style={{color:"var(--gold)",fontWeight:700,flexShrink:0}}>{isPdf(att)?"PDF":"FILE"}</span>
+            <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label}</span>
+          </button>
+      }
+      <button type="button" className="rcpt-del" aria-label="Remove attachment" onClick={e=>{e.stopPropagation(); onDelete(att);}}><Ic.X/></button>
     </div>
   );
 }
@@ -578,6 +616,8 @@ function Checklist({project,contractors,onUpdate}){
   const [failModal,setFailModal]=useState(null);
   const [failNote,setFailNote]=useState("");
   const [activeTab,setActiveTab]=useState("details");
+  const [payBusy,setPayBusy]=useState({});
+  const [payErr,setPayErr]=useState({});
 
   const effectiveDone=(ph)=>ph.tasks.filter(t=>t.completed||t.na).length===ph.tasks.length;
   const isUnlocked=(i)=>i===0||effectiveDone(project.phases[i-1]);
@@ -592,15 +632,72 @@ function Checklist({project,contractors,onUpdate}){
 
   const openEdit=(phI,tI)=>{ setDraft({...project.phases[phI].tasks[tI],lineItems:[...(project.phases[phI].tasks[tI].lineItems||[])],payments:[...(project.phases[phI].tasks[tI].payments||[])]}); setTaskModal({phI,tI}); setActiveTab("details"); };
 
-  const saveEdit=()=>{ mutate(taskModal.phI,taskModal.tI,{contractorId:draft.contractorId,notes:draft.notes,lineItems:draft.lineItems,payments:draft.payments}); setTaskModal(null);setDraft(null); };
+  const closeEdit=()=>{ setTaskModal(null);setDraft(null); setPayBusy({}); setPayErr({}); };
+
+  const saveEdit=()=>{ mutate(taskModal.phI,taskModal.tI,{contractorId:draft.contractorId,notes:draft.notes,lineItems:draft.lineItems,payments:draft.payments}); closeEdit(); };
 
   const addLineItem=()=>setDraft({...draft,lineItems:[...draft.lineItems,{id:uid(),description:"",labor:"",material:""}]});
   const updLI=(id,k,v)=>setDraft({...draft,lineItems:draft.lineItems.map(li=>li.id===id?{...li,[k]:v}:li)});
   const delLI=(id)=>setDraft({...draft,lineItems:draft.lineItems.filter(li=>li.id!==id)});
 
-  const addPayment=()=>setDraft({...draft,payments:[...draft.payments,{id:uid(),amount:"",date:today(),checkNum:"",lienWaiver:false,note:""}]});
+  const addPayment=()=>setDraft({...draft,payments:[...draft.payments,{id:uid(),amount:"",date:today(),checkNum:"",lienWaiver:false,note:"",attachments:[]}]});
   const updPay=(id,k,v)=>setDraft({...draft,payments:draft.payments.map(p=>p.id===id?{...p,[k]:v}:p)});
   const delPay=(id)=>setDraft({...draft,payments:draft.payments.filter(p=>p.id!==id)});
+
+  const openReceipt=async (att)=>{
+    try{
+      const url=await signedUrlFor(att.path);
+      window.open(url,"_blank","noopener,noreferrer");
+    }catch(e){
+      console.error(e);
+      alert("Could not open receipt. Check your connection.");
+    }
+  };
+
+  const addAttachments=async (paymentId, fileList)=>{
+    const files=Array.from(fileList||[]);
+    if(!files.length||!taskModal) return;
+    const task=project.phases[taskModal.phI].tasks[taskModal.tI];
+    setPayErr(e=>({...e,[paymentId]:""}));
+    setPayBusy(b=>({...b,[paymentId]:true}));
+    try{
+      for(const file of files){
+        if(file.size>10*1024*1024){
+          setPayErr(e=>({...e,[paymentId]:`${file.name||"File"} is over 10MB`}));
+          continue;
+        }
+        const att=await uploadPaymentAttachment({
+          projectId:project.id,
+          taskId:task.id,
+          paymentId,
+          file,
+        });
+        setDraft(d=>({
+          ...d,
+          payments:d.payments.map(p=>p.id===paymentId?{...p,attachments:[...(p.attachments||[]),att]}:p),
+        }));
+      }
+    }catch(err){
+      console.error(err);
+      setPayErr(e=>({...e,[paymentId]:err.message||"Upload failed"}));
+    }finally{
+      setPayBusy(b=>({...b,[paymentId]:false}));
+    }
+  };
+
+  const removeAttachment=async (paymentId, att)=>{
+    try{
+      await removePaymentAttachment(att.path);
+    }catch(err){
+      console.error(err);
+      setPayErr(e=>({...e,[paymentId]:"Could not delete file"}));
+      return;
+    }
+    setDraft(d=>({
+      ...d,
+      payments:d.payments.map(p=>p.id===paymentId?{...p,attachments:(p.attachments||[]).filter(a=>a.id!==att.id)}:p),
+    }));
+  };
 
   const logFail=(phI,tI)=>{ const t=project.phases[phI].tasks[tI]; mutate(phI,tI,{failedInspections:[...(t.failedInspections||[]),{id:uid(),date:today(),note:failNote}]}); setFailModal(null);setFailNote(""); };
 
@@ -677,7 +774,7 @@ function Checklist({project,contractors,onUpdate}){
         const paidTotal=draft.payments.reduce((s,p)=>s+num(p.amount),0);
         const owed=liTotal-paidTotal;
         return (
-          <Modal title={task.name} onClose={()=>{setTaskModal(null);setDraft(null);}}>
+          <Modal title={task.name} onClose={closeEdit}>
             <div className="tab-row">
               {["details","costs","payments"].map(t=>(
                 <div key={t} className={`tab${activeTab===t?" on":""}`} onClick={()=>setActiveTab(t)} style={{textTransform:"capitalize"}}>{t}</div>
@@ -747,12 +844,33 @@ function Checklist({project,contractors,onUpdate}){
                     </div>
                     <span style={{fontSize:12,color:p.lienWaiver?"var(--green)":"var(--red)",fontWeight:500}}>Lien Waiver Received</span>
                   </div>
+                  <label className="lbl" style={{marginTop:10}}>Invoice / receipt</label>
+                  {(p.attachments||[]).length>0&&(
+                    <div className="rcpt-row">
+                      {(p.attachments||[]).map(att=>(
+                        <ReceiptThumb key={att.id} att={att} onOpen={openReceipt} onDelete={a=>removeAttachment(p.id,a)}/>
+                      ))}
+                    </div>
+                  )}
+                  <label className="bto rcpt-add" style={{fontSize:11,padding:"5px 10px"}}>
+                    <Ic.Cam/>
+                    {payBusy[p.id]?"Uploading…":"Add photo / PDF"}
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      capture="environment"
+                      multiple
+                      disabled={!!payBusy[p.id]}
+                      onChange={e=>{ addAttachments(p.id, e.target.files); e.target.value=""; }}
+                    />
+                  </label>
+                  {payErr[p.id]&&<div style={{fontSize:11,color:"var(--red)",marginTop:6}}>{payErr[p.id]}</div>}
                 </div>
               ))}
             </>}
 
             <button className="btn" style={{marginTop:14}} onClick={saveEdit}>Save Changes</button>
-            <button className="btg" onClick={()=>{setTaskModal(null);setDraft(null);}}>Cancel</button>
+            <button className="btg" onClick={closeEdit}>Cancel</button>
           </Modal>
         );
       })()}
