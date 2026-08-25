@@ -7,6 +7,25 @@ const fmt = (n) => "$" + num(n).toLocaleString("en-US", { minimumFractionDigits:
 const today = () => new Date().toLocaleDateString();
 const now = () => new Date().toLocaleString();
 
+// Stable data.type keys: custom | spec | flip | commercial
+const JOB_TYPES = [
+  {value:"custom", label:"Custom (Client Build)", short:"Custom", tag:"tgo"},
+  {value:"spec", label:"Spec House", short:"Spec", tag:"tb"},
+  {value:"flip", label:"Residential Flip", short:"Flip", tag:"tp"},
+  {value:"commercial", label:"Commercial Construction", short:"Commercial", tag:"tc"},
+];
+const jobType = (type) => JOB_TYPES.find(t=>t.value===type) || JOB_TYPES[0];
+const isFlip = (type) => type === "flip";
+const hasClientFlow = (type) => type === "custom" || type === "spec";
+
+function TypeSelect({value,onChange}){
+  return (
+    <select className="inp" value={value} onChange={e=>onChange(e.target.value)}>
+      {JOB_TYPES.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}
+    </select>
+  );
+}
+
 // ── PHASE / TASK TEMPLATE ─────────────────────────────────────────────────
 const DRAW_PHASES = [
   { id:"d1", name:"Draw 1 — Foundation & Pad", short:"Foundation", icon:"🏗️", tasks:[
@@ -101,14 +120,65 @@ const DRAW_PHASES = [
   ]},
 ];
 
-const buildPhases = () => DRAW_PHASES.map(ph=>({
-  ...ph,
-  tasks: ph.tasks.map(t=>({
-    ...t, completed:false, na:false,
-    contractorId:null, notes:"", failedInspections:[],
-    lineItems:[], payments:[],
-  }))
+// Commercial default — usable job phases, not a lender-draw schedule
+const COMMERCIAL_PHASES = [
+  { id:"c1", name:"Site / Demo & Mobilization", short:"Site", icon:"🚧", tasks:[
+    {id:"c_survey",name:"Site Survey / Existing Conditions"},
+    {id:"c_permits",name:"Permits Received"},
+    {id:"c_insurance",name:"Insurance & GC Setup"},
+    {id:"c_demo",name:"Demo / Selective Demolition"},
+    {id:"c_temp",name:"Temp Facilities / Site Utilities"},
+    {id:"c_mobilize",name:"Mobilization Complete"},
+  ]},
+  { id:"c2", name:"Structure / Shell", short:"Structure", icon:"🏢", tasks:[
+    {id:"c_found",name:"Foundations / Footings"},
+    {id:"c_struct",name:"Structural Steel / Framing"},
+    {id:"c_deck",name:"Floor / Roof Deck"},
+    {id:"c_envelope",name:"Exterior Envelope / Weather Barrier"},
+    {id:"c_roof",name:"Roofing"},
+    {id:"c_struct_insp",name:"Structure Inspection — PASSED", isInspection:true},
+  ]},
+  { id:"c3", name:"MEP Rough-In", short:"MEP", icon:"🔧", tasks:[
+    {id:"c_plumb",name:"Rough Plumbing"},
+    {id:"c_elec",name:"Rough Electrical"},
+    {id:"c_hvac",name:"HVAC / Mechanical Rough-In"},
+    {id:"c_fire",name:"Fire Sprinkler / Alarm Rough-In"},
+    {id:"c_mep_insp",name:"MEP Rough Inspections — PASSED", isInspection:true},
+  ]},
+  { id:"c4", name:"Interior Build-Out", short:"Build-Out", icon:"🧱", tasks:[
+    {id:"c_part",name:"Interior Framing / Partitions"},
+    {id:"c_insul",name:"Insulation"},
+    {id:"c_drywall",name:"Drywall Hung, Taped & Finished"},
+    {id:"c_ceil",name:"Ceiling Grid / Overhead"},
+    {id:"c_floor_prep",name:"Flooring Prep"},
+  ]},
+  { id:"c5", name:"Finishes", short:"Finishes", icon:"🎨", tasks:[
+    {id:"c_paint",name:"Paint"},
+    {id:"c_floor",name:"Flooring Installed"},
+    {id:"c_case",name:"Millwork / Casework"},
+    {id:"c_fix",name:"Fixtures / Lighting"},
+    {id:"c_equip",name:"Specialty Equipment (if any)"},
+    {id:"c_ext",name:"Exterior Finishes"},
+  ]},
+  { id:"c6", name:"Closeout / Punch", short:"Closeout", icon:"✅", tasks:[
+    {id:"c_final_insp",name:"Final Inspections — PASSED", isInspection:true},
+    {id:"c_punch",name:"Punch List Complete"},
+    {id:"c_co",name:"Certificate of Occupancy / Completion"},
+    {id:"c_docs",name:"As-Builts / Closeout Docs"},
+    {id:"c_walk",name:"Owner Walk-Through & Sign-Off"},
+  ]},
+];
+
+const seedTasks = (tasks) => tasks.map(t=>({
+  ...t, completed:false, na:false,
+  contractorId:null, notes:"", failedInspections:[],
+  lineItems:[], payments:[],
 }));
+
+const buildPhases = (type) => {
+  const src = type === "commercial" ? COMMERCIAL_PHASES : DRAW_PHASES;
+  return src.map(ph=>({...ph, tasks: seedTasks(ph.tasks)}));
+};
 
 // ── STYLES ────────────────────────────────────────────────────────────────
 const CSS = `
@@ -148,6 +218,7 @@ body{background:#0d1117;color:#e6e2d8;font-family:'DM Sans',sans-serif;-webkit-f
 .tgo{background:rgba(200,164,86,.12);color:var(--gold)}
 .tb{background:rgba(78,144,217,.12);color:var(--blue)}
 .tp{background:rgba(155,127,232,.12);color:var(--purple)}
+.tc{background:rgba(232,160,90,.12);color:#e8a05a}
 .tm{background:rgba(107,117,146,.12);color:var(--muted)}
 .div{border:none;border-top:1px solid var(--border);margin:10px 0}
 .cr{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
@@ -298,7 +369,7 @@ export default function App({ session }) {
             {tab==="log"&&active&&<JobLog project={active} onUpdate={updateActive}/>}
             {tab==="more"&&<More active={active} projects={projects} onUpdate={setProj} updateActive={updateActive} setTab={setTab} onSignOut={signOut}/>}
             {tab==="finishes_more"&&active&&<div><div style={{padding:"10px 13px"}}><button className="btg" style={{width:"auto",padding:"7px 14px",marginTop:0}} onClick={()=>setTab("more")}>← Back</button></div><Finishes project={active} onUpdate={updateActive}/></div>}
-            {tab==="portal_more"&&active&&<div><div style={{padding:"10px 13px"}}><button className="btg" style={{width:"auto",padding:"7px 14px",marginTop:0}} onClick={()=>setTab("more")}>← Back</button></div><Portal project={active} onUpdate={updateActive}/></div>}
+            {tab==="portal_more"&&active&&<div><div style={{padding:"10px 13px"}}><button className="btg" style={{width:"auto",padding:"7px 14px",marginTop:0}} onClick={()=>setTab("more")}>← Back</button></div>{hasClientFlow(active.type)?<Portal project={active} onUpdate={updateActive}/>:<div className="card" style={{color:"var(--muted)",fontSize:13,lineHeight:1.5}}>No homeowner portal for {jobType(active.type).label.toLowerCase()} jobs. Use Finishes, Financials, and the Job Log instead.</div>}</div>}
           </div>
         }
       </div>
@@ -311,16 +382,40 @@ export default function App({ session }) {
 }
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────
+const EMPTY_PROJECT_FORM={name:"",address:"",salePrice:"",markupPct:"10",startDate:"",type:"custom",clientName:"",clientEmail:"",purchasePrice:"",holdCosts:"",arv:""};
+
 function Dashboard({projects,contractors,onOpen,onUpdate,onDelete}){
   const [modal,setModal]=useState(false);
-  const [form,setForm]=useState({name:"",address:"",salePrice:"",markupPct:"10",startDate:"",type:"custom",clientName:"",clientEmail:""});
+  const [form,setForm]=useState(EMPTY_PROJECT_FORM);
 
   const create=()=>{
     if(!form.name.trim()) return;
-    const p={id:uid(),...form,clientPin:uid().toUpperCase().slice(0,6),createdAt:new Date().toISOString(),phases:buildPhases(),changeOrders:[],selections:[],jobLog:[],finishes:[]};
+    const p={
+      id:uid(),
+      name:form.name,
+      address:form.address,
+      startDate:form.startDate,
+      type:form.type,
+      clientPin:uid().toUpperCase().slice(0,6),
+      createdAt:new Date().toISOString(),
+      phases:buildPhases(form.type),
+      changeOrders:[],selections:[],jobLog:[],finishes:[],
+    };
+    if(isFlip(form.type)){
+      p.purchasePrice=form.purchasePrice;
+      p.holdCosts=form.holdCosts;
+      p.arv=form.arv;
+    }else{
+      p.salePrice=form.salePrice;
+      p.markupPct=form.markupPct;
+    }
+    if(hasClientFlow(form.type)){
+      p.clientName=form.clientName;
+      p.clientEmail=form.clientEmail;
+    }
     onUpdate([...projects,p], p);
     setModal(false);
-    setForm({name:"",address:"",salePrice:"",markupPct:"10",startDate:"",type:"custom",clientName:"",clientEmail:""});
+    setForm(EMPTY_PROJECT_FORM);
   };
 
   const del=(id,e)=>{e.stopPropagation();if(confirm("Delete this project? Cannot be undone."))onDelete(id);};
@@ -346,37 +441,60 @@ function Dashboard({projects,contractors,onOpen,onUpdate,onDelete}){
         const totalCost=laborCost+matCost+coTotal;
         const sale=num(proj.salePrice);
         const markup=totalCost*(num(proj.markupPct)/100);
-        const margin=sale-(totalCost+markup);
+        const lot=num(proj.lotCost||0);
+        const margin=sale-(totalCost+markup+lot);
+        const jt=jobType(proj.type);
+        const flip=isFlip(proj.type);
+        const arv=num(proj.arv);
+        const purchase=num(proj.purchasePrice);
+        const hold=num(proj.holdCosts);
+        const flipProfit=arv-(purchase+hold+totalCost);
         const cur=proj.phases.find(ph=>ph.tasks.some(t=>!t.completed&&!t.na));
+        const headlines=flip
+          ?[{l:"ARV",v:arv?fmt(arv):"—",c:"var(--gold)"},{l:"Purchase",v:purchase?fmt(purchase):"—",c:"var(--text)"},{l:"Rehab",v:fmt(totalCost),c:"var(--text)"}]
+          :proj.type==="spec"
+            ?[{l:"Sale Price",v:sale?fmt(sale):"—",c:"var(--gold)"},{l:"Lot",v:lot?fmt(lot):"—",c:"var(--text)"},{l:"Est. Margin",v:sale?fmt(margin):"—",c:margin>=0?"var(--green)":"var(--red)"}]
+            :[{l:"Cost to Date",v:fmt(totalCost),c:"var(--text)"},{l:"Paid to Subs",v:fmt(paid),c:"var(--blue)"},{l:"Est. Margin",v:sale?fmt(margin):"—",c:margin>=0?"var(--green)":"var(--red)"}];
         return (
           <div key={proj.id} className="card" style={{cursor:"pointer"}} onClick={()=>onOpen(proj.id)}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
               <div style={{flex:1}}><div style={{fontWeight:600,fontSize:15,marginBottom:2}}>{proj.name}</div>{proj.address&&<div style={{fontSize:11,color:"var(--muted)"}}>{proj.address}</div>}</div>
-              <span className={`tag ${proj.type==="spec"?"tb":"tgo"}`} style={{marginLeft:8,flexShrink:0}}>{proj.type==="spec"?"Spec":"Custom"}</span>
+              <span className={`tag ${jt.tag}`} style={{marginLeft:8,flexShrink:0}}>{jt.short}</span>
             </div>
             {cur&&<div style={{fontSize:11,color:"var(--muted)",marginTop:5}}>📍 {cur.short||cur.name}</div>}
             <div className="pb" style={{marginTop:7}}><div className="pf" style={{width:`${pct}%`}}/></div>
             <div style={{display:"flex",justifyContent:"space-between",marginTop:4,fontSize:10,color:"var(--muted)"}}><span>{pct}% complete</span><span>{done}/{active.length} tasks</span></div>
             <div className="div"/>
             <div className="row3">
-              {[{l:"Cost to Date",v:fmt(totalCost),c:"var(--text)"},{l:"Paid to Subs",v:fmt(paid),c:"var(--blue)"},{l:"Est. Margin",v:sale?fmt(margin):"—",c:margin>=0?"var(--green)":"var(--red)"}].map(({l,v,c})=>(
+              {headlines.map(({l,v,c})=>(
                 <div key={l} className="c2"><div style={{fontSize:9,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{l}</div><div style={{fontSize:12,fontWeight:600,marginTop:2,color:c}}>{v}</div></div>
               ))}
             </div>
+            {flip&&<div style={{marginTop:8,fontSize:11,color:arv?(flipProfit>=0?"var(--green)":"var(--red)"):"var(--muted)",textAlign:"center"}}>{arv?`Projected profit ${fmt(flipProfit)}`:"Set ARV to see projected profit"}</div>}
             <div style={{marginTop:9,textAlign:"right"}}><button className="btd" onClick={e=>del(proj.id,e)}>Delete</button></div>
           </div>
         );
       })}
 
       {modal&&<Modal title="New Project" onClose={()=>setModal(false)}>
-        {[{l:"Project Name *",k:"name",p:"e.g. 108 N Sibley",t:"text"},{l:"Address",k:"address",p:"Street address",t:"text"},{l:"Contract / Sale Price ($)",k:"salePrice",p:"e.g. 750000",t:"number"},{l:"Builder's Premium / Markup %",k:"markupPct",p:"10",t:"number"},{l:"Target Start Date",k:"startDate",p:"",t:"date"}].map(({l,k,p,t})=>(
-          <div key={k} className="fld"><label className="lbl">{l}</label><input className="inp" type={t} placeholder={p} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></div>
-        ))}
-        <div className="fld"><label className="lbl">Build Type</label><select className="inp" value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option value="custom">Custom (Client Build)</option><option value="spec">Spec House</option></select></div>
-        <div className="div"/>
-        <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:9}}>Client Portal (optional)</div>
-        <div className="fld"><label className="lbl">Client Name</label><input className="inp" placeholder="John & Jane Smith" value={form.clientName} onChange={e=>setForm({...form,clientName:e.target.value})}/></div>
-        <div className="fld"><label className="lbl">Client Email</label><input className="inp" type="email" placeholder="client@email.com" value={form.clientEmail} onChange={e=>setForm({...form,clientEmail:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">Project Name *</label><input className="inp" placeholder="e.g. 108 N Sibley" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">Address</label><input className="inp" placeholder="Street address" value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">Job Type</label><TypeSelect value={form.type} onChange={type=>setForm({...form,type})}/></div>
+        {isFlip(form.type)?<>
+          <div className="fld"><label className="lbl">Purchase Price ($)</label><input className="inp" type="number" placeholder="e.g. 185000" value={form.purchasePrice} onChange={e=>setForm({...form,purchasePrice:e.target.value})}/></div>
+          <div className="fld"><label className="lbl">Hold Costs ($)</label><input className="inp" type="number" placeholder="Taxes, insurance, utilities, interest" value={form.holdCosts} onChange={e=>setForm({...form,holdCosts:e.target.value})}/></div>
+          <div className="fld"><label className="lbl">After Repair Value / ARV ($)</label><input className="inp" type="number" placeholder="e.g. 320000" value={form.arv} onChange={e=>setForm({...form,arv:e.target.value})}/></div>
+        </>:<>
+          <div className="fld"><label className="lbl">{form.type==="commercial"?"Contract Price ($)":"Contract / Sale Price ($)"}</label><input className="inp" type="number" placeholder="e.g. 750000" value={form.salePrice} onChange={e=>setForm({...form,salePrice:e.target.value})}/></div>
+          <div className="fld"><label className="lbl">Builder's Premium / Markup %</label><input className="inp" type="number" placeholder="10" value={form.markupPct} onChange={e=>setForm({...form,markupPct:e.target.value})}/></div>
+        </>}
+        <div className="fld"><label className="lbl">Target Start Date</label><input className="inp" type="date" value={form.startDate} onChange={e=>setForm({...form,startDate:e.target.value})}/></div>
+        {hasClientFlow(form.type)&&<>
+          <div className="div"/>
+          <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:9}}>Client Portal (optional)</div>
+          <div className="fld"><label className="lbl">Client Name</label><input className="inp" placeholder="John & Jane Smith" value={form.clientName} onChange={e=>setForm({...form,clientName:e.target.value})}/></div>
+          <div className="fld"><label className="lbl">Client Email</label><input className="inp" type="email" placeholder="client@email.com" value={form.clientEmail} onChange={e=>setForm({...form,clientEmail:e.target.value})}/></div>
+        </>}
         <button className="btn" onClick={create}>Create Project</button>
         <button className="btg" onClick={()=>setModal(false)}>Cancel</button>
       </Modal>}
@@ -593,8 +711,15 @@ function Financials({project,onUpdate}){
   const [editMarkup,setEditMarkup]=useState(false);
   const [editLot,setEditLot]=useState(false);
   const [lotInput,setLotInput]=useState(project.lotCost||"");
+  const [editArv,setEditArv]=useState(false);
+  const [arvInput,setArvInput]=useState(project.arv||"");
+  const [editPurchase,setEditPurchase]=useState(false);
+  const [purchaseInput,setPurchaseInput]=useState(project.purchasePrice||"");
+  const [editHold,setEditHold]=useState(false);
+  const [holdInput,setHoldInput]=useState(project.holdCosts||"");
   const [finTab,setFinTab]=useState("summary");
 
+  const flip=isFlip(project.type);
   const tasks=project.phases.flatMap(ph=>ph.tasks);
   const lineItems=tasks.flatMap(t=>t.lineItems||[]);
   const laborTotal=lineItems.reduce((s,li)=>s+num(li.labor),0);
@@ -604,12 +729,19 @@ function Financials({project,onUpdate}){
   const approvedCOs=cos.filter(co=>co.status==="approved"||co.status==="complete").reduce((s,co)=>s+num(co.amount),0);
   const markup=hardCost*(num(project.markupPct||10)/100);
   const lotCost=num(project.lotCost||0);
+  const purchasePrice=num(project.purchasePrice||0);
+  const holdCosts=num(project.holdCosts||0);
+  const arv=num(project.arv||0);
   const financingEntries=project.financingCosts||[];
   const financingTotal=financingEntries.reduce((s,f)=>s+num(f.amount),0);
   const totalCost=lotCost+hardCost+markup+approvedCOs+financingTotal;
   const sale=num(project.salePrice);
   const margin=sale-totalCost;
   const marginPct=sale?((margin/sale)*100).toFixed(1):0;
+  const rehab=hardCost+approvedCOs;
+  const flipTotal=purchasePrice+holdCosts+rehab+financingTotal;
+  const flipProfit=arv-flipTotal;
+  const flipPct=arv?((flipProfit/arv)*100).toFixed(1):0;
   const paidToDate=tasks.flatMap(t=>t.payments||[]).reduce((s,p)=>s+num(p.amount),0);
   const missingWaivers=tasks.flatMap(t=>t.payments||[]).filter(p=>num(p.amount)>0&&!p.lienWaiver).length;
 
@@ -648,17 +780,34 @@ function Financials({project,onUpdate}){
       {finTab==="budget"&&<BudgetView project={project} onUpdate={onUpdate}/>}
 
       {finTab==="summary"&&<div className="card" style={{borderRadius:"0 0 12px 12px",marginTop:0}}>
-        {/* Sale Price */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-          <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>Sale / Contract Price</div>
-          {!editSale?<button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={()=>{setSaleInput(project.salePrice);setEditSale(true);}}>Edit</button>
-            :<div style={{display:"flex",gap:5}}><input className="inp" type="number" value={saleInput} onChange={e=>setSaleInput(e.target.value)} style={{width:95,padding:"4px 8px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"4px 10px",fontSize:11}} onClick={()=>{onUpdate({...project,salePrice:saleInput});setEditSale(false);}}>Save</button></div>}
-        </div>
-        <div style={{fontSize:24,fontWeight:600,color:"var(--gold)",marginBottom:12}}>{sale?fmt(sale):"Not set"}</div>
+        {flip?<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+            <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>After Repair Value (ARV)</div>
+            {!editArv?<button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={()=>{setArvInput(project.arv||"");setEditArv(true);}}>Edit</button>
+              :<div style={{display:"flex",gap:5}}><input className="inp" type="number" value={arvInput} onChange={e=>setArvInput(e.target.value)} style={{width:95,padding:"4px 8px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"4px 10px",fontSize:11}} onClick={()=>{onUpdate({...project,arv:arvInput});setEditArv(false);}}>Save</button></div>}
+          </div>
+          <div style={{fontSize:24,fontWeight:600,color:"var(--gold)",marginBottom:12}}>{arv?fmt(arv):"Not set"}</div>
+        </>:<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+            <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>{project.type==="commercial"?"Contract Price":"Sale / Contract Price"}</div>
+            {!editSale?<button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={()=>{setSaleInput(project.salePrice);setEditSale(true);}}>Edit</button>
+              :<div style={{display:"flex",gap:5}}><input className="inp" type="number" value={saleInput} onChange={e=>setSaleInput(e.target.value)} style={{width:95,padding:"4px 8px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"4px 10px",fontSize:11}} onClick={()=>{onUpdate({...project,salePrice:saleInput});setEditSale(false);}}>Save</button></div>}
+          </div>
+          <div style={{fontSize:24,fontWeight:600,color:"var(--gold)",marginBottom:12}}>{sale?fmt(sale):"Not set"}</div>
+        </>}
 
-        {/* P&L rows */}
-        {[
-          {l:"Lot / Land Cost",v:lotCost,c:"var(--text)",edit:true},
+        {(flip?[
+          {l:"Purchase Price",v:purchasePrice,c:"var(--text)",field:"purchase"},
+          {l:"Hold Costs (taxes, insurance, utilities, interest)",v:holdCosts,c:"var(--text)",field:"hold"},
+          {l:"Labor (Rehab)",v:laborTotal,c:"var(--text)"},
+          {l:"Material (Rehab)",v:matTotal,c:"var(--text)"},
+          {l:"Rehab Total",v:hardCost,c:"var(--text)",bold:true},
+          {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
+          {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
+          {l:"Total Invested",v:flipTotal,c:"var(--text)",bold:true},
+          {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
+        ]:[
+          {l:project.type==="commercial"?"Site / Land Cost":"Lot / Land Cost",v:lotCost,c:"var(--text)",field:"lot"},
           {l:"Labor Costs",v:laborTotal,c:"var(--text)"},
           {l:"Material Costs",v:matTotal,c:"var(--text)"},
           {l:"Hard Cost Total",v:hardCost,c:"var(--text)",bold:true},
@@ -667,23 +816,26 @@ function Financials({project,onUpdate}){
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
           {l:"Total Project Cost",v:totalCost,c:"var(--text)",bold:true},
           {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
-        ].map(({l,v,c,bold,edit})=>(
+        ]).map(({l,v,c,bold,field})=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid var(--border)"}}>
             <span style={{fontSize:12,color:"var(--muted)"}}>{l}</span>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
-              {edit&&!editLot&&<button className="bto" style={{fontSize:10,padding:"2px 7px"}} onClick={()=>{setLotInput(project.lotCost||"");setEditLot(true);}}>Edit</button>}
-              {edit&&editLot&&<div style={{display:"flex",gap:4}}><input className="inp" type="number" value={lotInput} onChange={e=>setLotInput(e.target.value)} style={{width:90,padding:"3px 7px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"3px 9px",fontSize:11}} onClick={()=>{onUpdate({...project,lotCost:lotInput});setEditLot(false);}}>Save</button></div>}
+              {field==="lot"&&!editLot&&<button className="bto" style={{fontSize:10,padding:"2px 7px"}} onClick={()=>{setLotInput(project.lotCost||"");setEditLot(true);}}>Edit</button>}
+              {field==="lot"&&editLot&&<div style={{display:"flex",gap:4}}><input className="inp" type="number" value={lotInput} onChange={e=>setLotInput(e.target.value)} style={{width:90,padding:"3px 7px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"3px 9px",fontSize:11}} onClick={()=>{onUpdate({...project,lotCost:lotInput});setEditLot(false);}}>Save</button></div>}
+              {field==="purchase"&&!editPurchase&&<button className="bto" style={{fontSize:10,padding:"2px 7px"}} onClick={()=>{setPurchaseInput(project.purchasePrice||"");setEditPurchase(true);}}>Edit</button>}
+              {field==="purchase"&&editPurchase&&<div style={{display:"flex",gap:4}}><input className="inp" type="number" value={purchaseInput} onChange={e=>setPurchaseInput(e.target.value)} style={{width:90,padding:"3px 7px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"3px 9px",fontSize:11}} onClick={()=>{onUpdate({...project,purchasePrice:purchaseInput});setEditPurchase(false);}}>Save</button></div>}
+              {field==="hold"&&!editHold&&<button className="bto" style={{fontSize:10,padding:"2px 7px"}} onClick={()=>{setHoldInput(project.holdCosts||"");setEditHold(true);}}>Edit</button>}
+              {field==="hold"&&editHold&&<div style={{display:"flex",gap:4}}><input className="inp" type="number" value={holdInput} onChange={e=>setHoldInput(e.target.value)} style={{width:90,padding:"3px 7px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"3px 9px",fontSize:11}} onClick={()=>{onUpdate({...project,holdCosts:holdInput});setEditHold(false);}}>Save</button></div>}
               <span style={{fontSize:13,fontWeight:bold?700:600,color:c}}>{fmt(v)}</span>
             </div>
           </div>
         ))}
 
-        {/* Markup edit */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingBottom:8,borderBottom:"1px solid var(--border)"}}>
+        {!flip&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingBottom:8,borderBottom:"1px solid var(--border)"}}>
           <span style={{fontSize:11,color:"var(--muted)"}}>Adjust markup %</span>
           {!editMarkup?<button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={()=>{setMarkupInput(project.markupPct||"10");setEditMarkup(true);}}>Edit</button>
             :<div style={{display:"flex",gap:5}}><input className="inp" type="number" value={markupInput} onChange={e=>setMarkupInput(e.target.value)} style={{width:70,padding:"4px 8px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"4px 10px",fontSize:11}} onClick={()=>{onUpdate({...project,markupPct:markupInput});setEditMarkup(false);}}>Save</button></div>}
-        </div>
+        </div>}
 
         {/* Financing costs section */}
         <div style={{marginTop:10}}>
@@ -706,11 +858,15 @@ function Financials({project,onUpdate}){
           ))}
         </div>
 
-        {/* Margin */}
-        <div style={{marginTop:11,padding:12,background:margin>=0?"rgba(77,187,120,.08)":"rgba(224,82,82,.08)",border:`1px solid ${margin>=0?"rgba(77,187,120,.2)":"rgba(224,82,82,.2)"}`,borderRadius:8,textAlign:"center"}}>
-          <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:3}}>{sale?"Projected Margin":"Set sale price to see margin"}</div>
-          {sale&&<><div style={{fontSize:26,fontWeight:700,color:margin>=0?"var(--green)":"var(--red)"}}>{fmt(margin)}</div><div style={{fontSize:12,color:margin>=0?"var(--green)":"var(--red)",marginTop:2}}>{marginPct}% margin</div></>}
-        </div>
+        {flip
+          ?<div style={{marginTop:11,padding:12,background:flipProfit>=0?"rgba(77,187,120,.08)":"rgba(224,82,82,.08)",border:`1px solid ${flipProfit>=0?"rgba(77,187,120,.2)":"rgba(224,82,82,.2)"}`,borderRadius:8,textAlign:"center"}}>
+            <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:3}}>{arv?"Projected Profit":"Set ARV to see projected profit"}</div>
+            {arv&&<><div style={{fontSize:26,fontWeight:700,color:flipProfit>=0?"var(--green)":"var(--red)"}}>{fmt(flipProfit)}</div><div style={{fontSize:12,color:flipProfit>=0?"var(--green)":"var(--red)",marginTop:2}}>{flipPct}% of ARV</div></>}
+          </div>
+          :<div style={{marginTop:11,padding:12,background:margin>=0?"rgba(77,187,120,.08)":"rgba(224,82,82,.08)",border:`1px solid ${margin>=0?"rgba(77,187,120,.2)":"rgba(224,82,82,.2)"}`,borderRadius:8,textAlign:"center"}}>
+            <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:3}}>{sale?"Projected Margin":"Set sale price to see margin"}</div>
+            {sale&&<><div style={{fontSize:26,fontWeight:700,color:margin>=0?"var(--green)":"var(--red)"}}>{fmt(margin)}</div><div style={{fontSize:12,color:margin>=0?"var(--green)":"var(--red)",marginTop:2}}>{marginPct}% margin</div></>}
+          </div>}
 
         {missingWaivers>0&&<div style={{marginTop:10,padding:"8px 12px",background:"rgba(224,82,82,.08)",border:"1px solid rgba(224,82,82,.2)",borderRadius:8,fontSize:12,color:"var(--red)"}}>⚠ {missingWaivers} payment{missingWaivers>1?"s":""} missing lien waiver</div>}
       </div>}
@@ -1523,8 +1679,8 @@ function More({active,projects,onUpdate,updateActive,setTab,onSignOut}){
 
   const menuItems=[
     {icon:"🎨",label:"Finishes & Specs",desc:"Paint colors, materials, product specs",action:()=>setTab("finishes_more"),needsProject:true},
-    {icon:"👁️",label:"Client Portal",desc:"View client progress & selections",action:()=>setTab("portal_more"),needsProject:true},
-    {icon:"✏️",label:"Edit Project Details",desc:"Name, address, sale price, client info",action:()=>{setSelProject(active);setEditModal(true);},needsProject:true},
+    ...(!active||hasClientFlow(active.type)?[{icon:"👁️",label:"Client Portal",desc:"View client progress & selections",action:()=>setTab("portal_more"),needsProject:true}]:[]),
+    {icon:"✏️",label:"Edit Project Details",desc:"Name, address, job type, financials",action:()=>{setSelProject(active);setEditModal(true);},needsProject:true},
   ];
 
   return (
@@ -1592,29 +1748,62 @@ function EditProject({project,onSave,onClose}){
     type:project.type||"custom",
     clientName:project.clientName||"",
     clientEmail:project.clientEmail||"",
+    purchasePrice:project.purchasePrice||"",
+    holdCosts:project.holdCosts||"",
+    arv:project.arv||"",
   });
 
   const save=()=>{
     if(!form.name.trim()) return;
-    onSave({...project,...form});
+    const updated={
+      ...project,
+      name:form.name,
+      address:form.address,
+      startDate:form.startDate,
+      type:form.type,
+    };
+    if(isFlip(form.type)){
+      updated.purchasePrice=form.purchasePrice;
+      updated.holdCosts=form.holdCosts;
+      updated.arv=form.arv;
+    }else{
+      updated.salePrice=form.salePrice;
+      updated.markupPct=form.markupPct;
+    }
+    if(hasClientFlow(form.type)){
+      updated.clientName=form.clientName;
+      updated.clientEmail=form.clientEmail;
+      if(!updated.clientPin) updated.clientPin=uid().toUpperCase().slice(0,6);
+    }
+    onSave(updated);
   };
 
   return (
     <>
       <div className="fld"><label className="lbl">Project Name *</label><input className="inp" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
       <div className="fld"><label className="lbl">Address</label><input className="inp" placeholder="Street address" value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></div>
-      <div className="fld"><label className="lbl">Contract / Sale Price ($)</label><input className="inp" type="number" placeholder="e.g. 750000" value={form.salePrice} onChange={e=>setForm({...form,salePrice:e.target.value})}/></div>
-      <div className="fld"><label className="lbl">Builder's Premium / Markup %</label><input className="inp" type="number" placeholder="10" value={form.markupPct} onChange={e=>setForm({...form,markupPct:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Job Type</label><TypeSelect value={form.type} onChange={type=>setForm({...form,type})}/></div>
+      {isFlip(form.type)?<>
+        <div className="fld"><label className="lbl">Purchase Price ($)</label><input className="inp" type="number" placeholder="e.g. 185000" value={form.purchasePrice} onChange={e=>setForm({...form,purchasePrice:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">Hold Costs ($)</label><input className="inp" type="number" placeholder="Taxes, insurance, utilities, interest" value={form.holdCosts} onChange={e=>setForm({...form,holdCosts:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">After Repair Value / ARV ($)</label><input className="inp" type="number" placeholder="e.g. 320000" value={form.arv} onChange={e=>setForm({...form,arv:e.target.value})}/></div>
+      </>:<>
+        <div className="fld"><label className="lbl">{form.type==="commercial"?"Contract Price ($)":"Contract / Sale Price ($)"}</label><input className="inp" type="number" placeholder="e.g. 750000" value={form.salePrice} onChange={e=>setForm({...form,salePrice:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">Builder's Premium / Markup %</label><input className="inp" type="number" placeholder="10" value={form.markupPct} onChange={e=>setForm({...form,markupPct:e.target.value})}/></div>
+      </>}
       <div className="fld"><label className="lbl">Target Start Date</label><input className="inp" type="date" value={form.startDate} onChange={e=>setForm({...form,startDate:e.target.value})}/></div>
-      <div className="fld"><label className="lbl">Build Type</label><select className="inp" value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option value="custom">Custom (Client Build)</option><option value="spec">Spec House</option></select></div>
-      <div className="div"/>
-      <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:9}}>Client Portal</div>
-      <div className="fld"><label className="lbl">Client Name</label><input className="inp" placeholder="John & Jane Smith" value={form.clientName} onChange={e=>setForm({...form,clientName:e.target.value})}/></div>
-      <div className="fld"><label className="lbl">Client Email</label><input className="inp" type="email" placeholder="client@email.com" value={form.clientEmail} onChange={e=>setForm({...form,clientEmail:e.target.value})}/></div>
-      <div style={{padding:"9px 12px",background:"var(--card2)",borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-        <span style={{fontSize:11,color:"var(--muted)"}}>Client Portal PIN</span>
-        <span style={{fontFamily:"monospace",fontSize:15,color:"var(--gold)",letterSpacing:2}}>{project.clientPin||"——"}</span>
-      </div>
+      {hasClientFlow(form.type)?<>
+        <div className="div"/>
+        <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:9}}>Client Portal</div>
+        <div className="fld"><label className="lbl">Client Name</label><input className="inp" placeholder="John & Jane Smith" value={form.clientName} onChange={e=>setForm({...form,clientName:e.target.value})}/></div>
+        <div className="fld"><label className="lbl">Client Email</label><input className="inp" type="email" placeholder="client@email.com" value={form.clientEmail} onChange={e=>setForm({...form,clientEmail:e.target.value})}/></div>
+        <div style={{padding:"9px 12px",background:"var(--card2)",borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <span style={{fontSize:11,color:"var(--muted)"}}>Client Portal PIN</span>
+          <span style={{fontFamily:"monospace",fontSize:15,color:"var(--gold)",letterSpacing:2}}>{project.clientPin||"——"}</span>
+        </div>
+      </>:
+        <div style={{fontSize:11,color:"var(--muted)",margin:"4px 0 14px",lineHeight:1.5}}>No homeowner portal for this job type. Finishes, budget, and the job log still work as usual.</div>
+      }
       <button className="btn" onClick={save}>Save Changes</button>
       <button className="btg" onClick={onClose}>Cancel</button>
     </>
