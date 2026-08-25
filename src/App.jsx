@@ -7,22 +7,44 @@ const fmt = (n) => "$" + num(n).toLocaleString("en-US", { minimumFractionDigits:
 const today = () => new Date().toLocaleDateString();
 const now = () => new Date().toLocaleString();
 
-// Stable data.type keys: custom | spec | flip | commercial
+// Stable data.type keys: custom | spec | flip | commercial | commercial_rehab
 const JOB_TYPES = [
   {value:"custom", label:"Custom (Client Build)", short:"Custom", tag:"tgo"},
   {value:"spec", label:"Spec House", short:"Spec", tag:"tb"},
   {value:"flip", label:"Residential Flip", short:"Flip", tag:"tp"},
   {value:"commercial", label:"Commercial Construction", short:"Commercial", tag:"tc"},
+  {value:"commercial_rehab", label:"Commercial Rehab / TI", short:"Comm Rehab", tag:"tcr"},
 ];
 const jobType = (type) => JOB_TYPES.find(t=>t.value===type) || JOB_TYPES[0];
 const isFlip = (type) => type === "flip";
+const isCostTracking = (type) => type === "commercial_rehab";
 const hasClientFlow = (type) => type === "custom" || type === "spec";
+const projectBudget = (proj) => (proj.phases||[]).reduce((s,ph)=>s+(ph.tasks||[]).reduce((ss,t)=>ss+num(t.estimate),0),0);
 
 function TypeSelect({value,onChange}){
   return (
     <select className="inp" value={value} onChange={e=>onChange(e.target.value)}>
       {JOB_TYPES.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}
     </select>
+  );
+}
+
+function JobTypeFinancialFields({form,setForm}){
+  if(isFlip(form.type)) return (
+    <>
+      <div className="fld"><label className="lbl">Purchase Price ($)</label><input className="inp" type="number" placeholder="e.g. 185000" value={form.purchasePrice} onChange={e=>setForm({...form,purchasePrice:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Hold Costs ($)</label><input className="inp" type="number" placeholder="Taxes, insurance, utilities, interest" value={form.holdCosts} onChange={e=>setForm({...form,holdCosts:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">After Repair Value / ARV ($)</label><input className="inp" type="number" placeholder="e.g. 320000" value={form.arv} onChange={e=>setForm({...form,arv:e.target.value})}/></div>
+    </>
+  );
+  if(isCostTracking(form.type)) return (
+    <div style={{fontSize:11,color:"var(--muted)",margin:"4px 0 14px",lineHeight:1.5}}>Cost tracking only — budget, actuals, change orders, and paid-to-subs. No sale price, lot cost, or builder premium.</div>
+  );
+  return (
+    <>
+      <div className="fld"><label className="lbl">{form.type==="commercial"?"Contract Price ($)":"Contract / Sale Price ($)"}</label><input className="inp" type="number" placeholder="e.g. 750000" value={form.salePrice} onChange={e=>setForm({...form,salePrice:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Builder's Premium / Markup %</label><input className="inp" type="number" placeholder="10" value={form.markupPct} onChange={e=>setForm({...form,markupPct:e.target.value})}/></div>
+    </>
   );
 }
 
@@ -169,16 +191,64 @@ const COMMERCIAL_PHASES = [
   ]},
 ];
 
+// Commercial rehab / TI — existing building, not ground-up sitework or residential draws
+const COMMERCIAL_REHAB_PHASES = [
+  { id:"cr1", name:"Demo / Abatement", short:"Demo", icon:"🔨", tasks:[
+    {id:"cr_survey",name:"Existing Conditions / As-Built Survey"},
+    {id:"cr_hazmat",name:"Hazmat / Asbestos / Lead Survey"},
+    {id:"cr_permits",name:"Rehab Permits Received"},
+    {id:"cr_abatement",name:"Abatement Complete"},
+    {id:"cr_demo",name:"Selective Demolition"},
+    {id:"cr_dump",name:"Dumpsters / Debris Removal"},
+    {id:"cr_protect",name:"Adjacent Occupancy / Temp Protection"},
+  ]},
+  { id:"cr2", name:"Structural / Envelope", short:"Envelope", icon:"🏢", tasks:[
+    {id:"cr_struct",name:"Structural Repairs / Reinforcement"},
+    {id:"cr_masonry",name:"Masonry / Facade Repairs"},
+    {id:"cr_roof",name:"Roof / Flashing Repairs"},
+    {id:"cr_windows",name:"Windows / Exterior Doors"},
+    {id:"cr_envelope",name:"Weather Barrier / Envelope Tightening"},
+    {id:"cr_env_insp",name:"Structural / Envelope Inspection — PASSED", isInspection:true},
+  ]},
+  { id:"cr3", name:"MEP", short:"MEP", icon:"🔧", tasks:[
+    {id:"cr_plumb",name:"Plumbing Rough / Replacement"},
+    {id:"cr_elec",name:"Electrical Rough / Panels"},
+    {id:"cr_hvac",name:"HVAC / Mechanical"},
+    {id:"cr_fire",name:"Fire Sprinkler / Alarm"},
+    {id:"cr_mep_insp",name:"MEP Inspections — PASSED", isInspection:true},
+  ]},
+  { id:"cr4", name:"Interiors", short:"Interiors", icon:"🧱", tasks:[
+    {id:"cr_part",name:"Interior Framing / Partitions"},
+    {id:"cr_insul",name:"Insulation"},
+    {id:"cr_drywall",name:"Drywall Hung, Taped & Finished"},
+    {id:"cr_ceil",name:"Ceilings"},
+    {id:"cr_floor",name:"Flooring"},
+    {id:"cr_paint",name:"Paint / Wall Finishes"},
+    {id:"cr_case",name:"Millwork / Casework"},
+    {id:"cr_fix",name:"Fixtures / Lighting / Hardware"},
+  ]},
+  { id:"cr5", name:"Punch / Closeout", short:"Closeout", icon:"✅", tasks:[
+    {id:"cr_final_insp",name:"Final Inspections — PASSED", isInspection:true},
+    {id:"cr_punch",name:"Punch List Complete"},
+    {id:"cr_co",name:"Certificate of Occupancy / Completion"},
+    {id:"cr_docs",name:"As-Builts / Closeout Docs"},
+    {id:"cr_walk",name:"Owner Walk-Through & Sign-Off"},
+  ]},
+];
+
 const seedTasks = (tasks) => tasks.map(t=>({
   ...t, completed:false, na:false,
   contractorId:null, notes:"", failedInspections:[],
   lineItems:[], payments:[],
 }));
 
-const buildPhases = (type) => {
-  const src = type === "commercial" ? COMMERCIAL_PHASES : DRAW_PHASES;
-  return src.map(ph=>({...ph, tasks: seedTasks(ph.tasks)}));
+const phasesForType = (type) => {
+  if(type === "commercial_rehab") return COMMERCIAL_REHAB_PHASES;
+  if(type === "commercial") return COMMERCIAL_PHASES;
+  return DRAW_PHASES;
 };
+
+const buildPhases = (type) => phasesForType(type).map(ph=>({...ph, tasks: seedTasks(ph.tasks)}));
 
 // ── STYLES ────────────────────────────────────────────────────────────────
 const CSS = `
@@ -219,6 +289,7 @@ body{background:#0d1117;color:#e6e2d8;font-family:'DM Sans',sans-serif;-webkit-f
 .tb{background:rgba(78,144,217,.12);color:var(--blue)}
 .tp{background:rgba(155,127,232,.12);color:var(--purple)}
 .tc{background:rgba(232,160,90,.12);color:#e8a05a}
+.tcr{background:rgba(78,196,176,.12);color:#4ec4b0}
 .tm{background:rgba(107,117,146,.12);color:var(--muted)}
 .div{border:none;border-top:1px solid var(--border);margin:10px 0}
 .cr{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
@@ -405,7 +476,7 @@ function Dashboard({projects,contractors,onOpen,onUpdate,onDelete}){
       p.purchasePrice=form.purchasePrice;
       p.holdCosts=form.holdCosts;
       p.arv=form.arv;
-    }else{
+    }else if(!isCostTracking(form.type)){
       p.salePrice=form.salePrice;
       p.markupPct=form.markupPct;
     }
@@ -445,13 +516,17 @@ function Dashboard({projects,contractors,onOpen,onUpdate,onDelete}){
         const margin=sale-(totalCost+markup+lot);
         const jt=jobType(proj.type);
         const flip=isFlip(proj.type);
+        const costOnly=isCostTracking(proj.type);
         const arv=num(proj.arv);
         const purchase=num(proj.purchasePrice);
         const hold=num(proj.holdCosts);
         const flipProfit=arv-(purchase+hold+totalCost);
+        const budget=projectBudget(proj);
         const cur=proj.phases.find(ph=>ph.tasks.some(t=>!t.completed&&!t.na));
         const headlines=flip
           ?[{l:"ARV",v:arv?fmt(arv):"—",c:"var(--gold)"},{l:"Purchase",v:purchase?fmt(purchase):"—",c:"var(--text)"},{l:"Rehab",v:fmt(totalCost),c:"var(--text)"}]
+          :costOnly
+            ?[{l:"Cost to Date",v:fmt(totalCost),c:"var(--text)"},{l:"Paid to Subs",v:fmt(paid),c:"var(--blue)"},{l:"Budget",v:budget?fmt(budget):"—",c:"var(--gold)"}]
           :proj.type==="spec"
             ?[{l:"Sale Price",v:sale?fmt(sale):"—",c:"var(--gold)"},{l:"Lot",v:lot?fmt(lot):"—",c:"var(--text)"},{l:"Est. Margin",v:sale?fmt(margin):"—",c:margin>=0?"var(--green)":"var(--red)"}]
             :[{l:"Cost to Date",v:fmt(totalCost),c:"var(--text)"},{l:"Paid to Subs",v:fmt(paid),c:"var(--blue)"},{l:"Est. Margin",v:sale?fmt(margin):"—",c:margin>=0?"var(--green)":"var(--red)"}];
@@ -480,14 +555,7 @@ function Dashboard({projects,contractors,onOpen,onUpdate,onDelete}){
         <div className="fld"><label className="lbl">Project Name *</label><input className="inp" placeholder="e.g. 108 N Sibley" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
         <div className="fld"><label className="lbl">Address</label><input className="inp" placeholder="Street address" value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></div>
         <div className="fld"><label className="lbl">Job Type</label><TypeSelect value={form.type} onChange={type=>setForm({...form,type})}/></div>
-        {isFlip(form.type)?<>
-          <div className="fld"><label className="lbl">Purchase Price ($)</label><input className="inp" type="number" placeholder="e.g. 185000" value={form.purchasePrice} onChange={e=>setForm({...form,purchasePrice:e.target.value})}/></div>
-          <div className="fld"><label className="lbl">Hold Costs ($)</label><input className="inp" type="number" placeholder="Taxes, insurance, utilities, interest" value={form.holdCosts} onChange={e=>setForm({...form,holdCosts:e.target.value})}/></div>
-          <div className="fld"><label className="lbl">After Repair Value / ARV ($)</label><input className="inp" type="number" placeholder="e.g. 320000" value={form.arv} onChange={e=>setForm({...form,arv:e.target.value})}/></div>
-        </>:<>
-          <div className="fld"><label className="lbl">{form.type==="commercial"?"Contract Price ($)":"Contract / Sale Price ($)"}</label><input className="inp" type="number" placeholder="e.g. 750000" value={form.salePrice} onChange={e=>setForm({...form,salePrice:e.target.value})}/></div>
-          <div className="fld"><label className="lbl">Builder's Premium / Markup %</label><input className="inp" type="number" placeholder="10" value={form.markupPct} onChange={e=>setForm({...form,markupPct:e.target.value})}/></div>
-        </>}
+        <JobTypeFinancialFields form={form} setForm={setForm}/>
         <div className="fld"><label className="lbl">Target Start Date</label><input className="inp" type="date" value={form.startDate} onChange={e=>setForm({...form,startDate:e.target.value})}/></div>
         {hasClientFlow(form.type)&&<>
           <div className="div"/>
@@ -538,7 +606,7 @@ function Checklist({project,contractors,onUpdate}){
 
   return (
     <div>
-      <div className="sec">6-Phase Build Checklist</div>
+      <div className="sec">{project.phases.length}-Phase Checklist</div>
       {project.phases.map((ph,phI)=>{
         const unlocked=isUnlocked(phI);
         const activeTasks=ph.tasks.filter(t=>!t.na);
@@ -720,6 +788,8 @@ function Financials({project,onUpdate}){
   const [finTab,setFinTab]=useState("summary");
 
   const flip=isFlip(project.type);
+  const costOnly=isCostTracking(project.type);
+  const budget=projectBudget(project);
   const tasks=project.phases.flatMap(ph=>ph.tasks);
   const lineItems=tasks.flatMap(t=>t.lineItems||[]);
   const laborTotal=lineItems.reduce((s,li)=>s+num(li.labor),0);
@@ -744,6 +814,8 @@ function Financials({project,onUpdate}){
   const flipPct=arv?((flipProfit/arv)*100).toFixed(1):0;
   const paidToDate=tasks.flatMap(t=>t.payments||[]).reduce((s,p)=>s+num(p.amount),0);
   const missingWaivers=tasks.flatMap(t=>t.payments||[]).filter(p=>num(p.amount)>0&&!p.lienWaiver).length;
+  const costToDate=hardCost+approvedCOs+financingTotal;
+  const vsBudget=budget?costToDate-budget:0;
 
   const addCO=()=>{
     if(!coForm.description||!coForm.amount) return;
@@ -780,7 +852,10 @@ function Financials({project,onUpdate}){
       {finTab==="budget"&&<BudgetView project={project} onUpdate={onUpdate}/>}
 
       {finTab==="summary"&&<div className="card" style={{borderRadius:"0 0 12px 12px",marginTop:0}}>
-        {flip?<>
+        {costOnly?<>
+          <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:3}}>Cost to Date</div>
+          <div style={{fontSize:24,fontWeight:600,color:"var(--gold)",marginBottom:12}}>{fmt(costToDate)}</div>
+        </>:flip?<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
             <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>After Repair Value (ARV)</div>
             {!editArv?<button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={()=>{setArvInput(project.arv||"");setEditArv(true);}}>Edit</button>
@@ -796,7 +871,16 @@ function Financials({project,onUpdate}){
           <div style={{fontSize:24,fontWeight:600,color:"var(--gold)",marginBottom:12}}>{sale?fmt(sale):"Not set"}</div>
         </>}
 
-        {(flip?[
+        {(costOnly?[
+          {l:"Labor Costs",v:laborTotal,c:"var(--text)"},
+          {l:"Material Costs",v:matTotal,c:"var(--text)"},
+          {l:"Hard Cost Total",v:hardCost,c:"var(--text)",bold:true},
+          {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
+          {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
+          {l:"Cost to Date",v:costToDate,c:"var(--text)",bold:true},
+          {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
+          {l:"Budget (from estimates)",v:budget,c:"var(--gold)",blankZero:true},
+        ]:flip?[
           {l:"Purchase Price",v:purchasePrice,c:"var(--text)",field:"purchase"},
           {l:"Hold Costs (taxes, insurance, utilities, interest)",v:holdCosts,c:"var(--text)",field:"hold"},
           {l:"Labor (Rehab)",v:laborTotal,c:"var(--text)"},
@@ -816,7 +900,7 @@ function Financials({project,onUpdate}){
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
           {l:"Total Project Cost",v:totalCost,c:"var(--text)",bold:true},
           {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
-        ]).map(({l,v,c,bold,field})=>(
+        ]).map(({l,v,c,bold,field,blankZero})=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid var(--border)"}}>
             <span style={{fontSize:12,color:"var(--muted)"}}>{l}</span>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -826,12 +910,12 @@ function Financials({project,onUpdate}){
               {field==="purchase"&&editPurchase&&<div style={{display:"flex",gap:4}}><input className="inp" type="number" value={purchaseInput} onChange={e=>setPurchaseInput(e.target.value)} style={{width:90,padding:"3px 7px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"3px 9px",fontSize:11}} onClick={()=>{onUpdate({...project,purchasePrice:purchaseInput});setEditPurchase(false);}}>Save</button></div>}
               {field==="hold"&&!editHold&&<button className="bto" style={{fontSize:10,padding:"2px 7px"}} onClick={()=>{setHoldInput(project.holdCosts||"");setEditHold(true);}}>Edit</button>}
               {field==="hold"&&editHold&&<div style={{display:"flex",gap:4}}><input className="inp" type="number" value={holdInput} onChange={e=>setHoldInput(e.target.value)} style={{width:90,padding:"3px 7px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"3px 9px",fontSize:11}} onClick={()=>{onUpdate({...project,holdCosts:holdInput});setEditHold(false);}}>Save</button></div>}
-              <span style={{fontSize:13,fontWeight:bold?700:600,color:c}}>{fmt(v)}</span>
+              <span style={{fontSize:13,fontWeight:bold?700:600,color:c}}>{blankZero&&!v?"—":fmt(v)}</span>
             </div>
           </div>
         ))}
 
-        {!flip&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingBottom:8,borderBottom:"1px solid var(--border)"}}>
+        {!flip&&!costOnly&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingBottom:8,borderBottom:"1px solid var(--border)"}}>
           <span style={{fontSize:11,color:"var(--muted)"}}>Adjust markup %</span>
           {!editMarkup?<button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={()=>{setMarkupInput(project.markupPct||"10");setEditMarkup(true);}}>Edit</button>
             :<div style={{display:"flex",gap:5}}><input className="inp" type="number" value={markupInput} onChange={e=>setMarkupInput(e.target.value)} style={{width:70,padding:"4px 8px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"4px 10px",fontSize:11}} onClick={()=>{onUpdate({...project,markupPct:markupInput});setEditMarkup(false);}}>Save</button></div>}
@@ -858,7 +942,12 @@ function Financials({project,onUpdate}){
           ))}
         </div>
 
-        {flip
+        {costOnly
+          ?(budget>0&&<div style={{marginTop:11,padding:12,background:vsBudget<=0?"rgba(77,187,120,.08)":"rgba(224,82,82,.08)",border:`1px solid ${vsBudget<=0?"rgba(77,187,120,.2)":"rgba(224,82,82,.2)"}`,borderRadius:8,textAlign:"center"}}>
+            <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:3}}>Vs Budget</div>
+            <div style={{fontSize:26,fontWeight:700,color:vsBudget<=0?"var(--green)":"var(--red)"}}>{vsBudget<=0?fmt(Math.abs(vsBudget))+" under":fmt(vsBudget)+" over"}</div>
+          </div>)
+          :flip
           ?<div style={{marginTop:11,padding:12,background:flipProfit>=0?"rgba(77,187,120,.08)":"rgba(224,82,82,.08)",border:`1px solid ${flipProfit>=0?"rgba(77,187,120,.2)":"rgba(224,82,82,.2)"}`,borderRadius:8,textAlign:"center"}}>
             <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:3}}>{arv?"Projected Profit":"Set ARV to see projected profit"}</div>
             {arv&&<><div style={{fontSize:26,fontWeight:700,color:flipProfit>=0?"var(--green)":"var(--red)"}}>{fmt(flipProfit)}</div><div style={{fontSize:12,color:flipProfit>=0?"var(--green)":"var(--red)",marginTop:2}}>{flipPct}% of ARV</div></>}
@@ -1756,7 +1845,7 @@ function EditProject({project,onSave,onClose}){
   const save=()=>{
     if(!form.name.trim()) return;
     const updated={
-      ...project,
+      ...project, // existing phases/checklists are kept when type changes
       name:form.name,
       address:form.address,
       startDate:form.startDate,
@@ -1766,7 +1855,7 @@ function EditProject({project,onSave,onClose}){
       updated.purchasePrice=form.purchasePrice;
       updated.holdCosts=form.holdCosts;
       updated.arv=form.arv;
-    }else{
+    }else if(!isCostTracking(form.type)){
       updated.salePrice=form.salePrice;
       updated.markupPct=form.markupPct;
     }
@@ -1783,14 +1872,7 @@ function EditProject({project,onSave,onClose}){
       <div className="fld"><label className="lbl">Project Name *</label><input className="inp" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
       <div className="fld"><label className="lbl">Address</label><input className="inp" placeholder="Street address" value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></div>
       <div className="fld"><label className="lbl">Job Type</label><TypeSelect value={form.type} onChange={type=>setForm({...form,type})}/></div>
-      {isFlip(form.type)?<>
-        <div className="fld"><label className="lbl">Purchase Price ($)</label><input className="inp" type="number" placeholder="e.g. 185000" value={form.purchasePrice} onChange={e=>setForm({...form,purchasePrice:e.target.value})}/></div>
-        <div className="fld"><label className="lbl">Hold Costs ($)</label><input className="inp" type="number" placeholder="Taxes, insurance, utilities, interest" value={form.holdCosts} onChange={e=>setForm({...form,holdCosts:e.target.value})}/></div>
-        <div className="fld"><label className="lbl">After Repair Value / ARV ($)</label><input className="inp" type="number" placeholder="e.g. 320000" value={form.arv} onChange={e=>setForm({...form,arv:e.target.value})}/></div>
-      </>:<>
-        <div className="fld"><label className="lbl">{form.type==="commercial"?"Contract Price ($)":"Contract / Sale Price ($)"}</label><input className="inp" type="number" placeholder="e.g. 750000" value={form.salePrice} onChange={e=>setForm({...form,salePrice:e.target.value})}/></div>
-        <div className="fld"><label className="lbl">Builder's Premium / Markup %</label><input className="inp" type="number" placeholder="10" value={form.markupPct} onChange={e=>setForm({...form,markupPct:e.target.value})}/></div>
-      </>}
+      <JobTypeFinancialFields form={form} setForm={setForm}/>
       <div className="fld"><label className="lbl">Target Start Date</label><input className="inp" type="date" value={form.startDate} onChange={e=>setForm({...form,startDate:e.target.value})}/></div>
       {hasClientFlow(form.type)?<>
         <div className="div"/>
