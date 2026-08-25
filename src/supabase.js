@@ -81,3 +81,78 @@ export const loadProjectByPin = async (pin) => {
   if (!match) return null;
   return { id: match.id, ...match.data };
 };
+
+// ── Payment receipts (private bucket `job-receipts`) ──────────────────────
+const RECEIPTS_BUCKET = 'job-receipts';
+const SIGNED_URL_TTL = 3600;
+const uid = () => Math.random().toString(36).slice(2, 9);
+
+/** Strip path separators and unsafe characters from an original filename. */
+export const sanitizeFilename = (name) => {
+  const base = String(name || 'receipt').split(/[/\\]/).pop() || 'receipt';
+  const cleaned = base.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^\.+/, '');
+  return cleaned || 'receipt';
+};
+
+const uniqueStoredName = (originalName, mime) => {
+  const safe = sanitizeFilename(originalName);
+  const unique = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : uid();
+  const dot = safe.lastIndexOf('.');
+  if (dot > 0) return `${safe.slice(0, dot)}_${unique}${safe.slice(dot)}`;
+  const ext = mime === 'application/pdf' ? '.pdf'
+    : mime === 'image/jpeg' ? '.jpg'
+    : mime === 'image/png' ? '.png'
+    : mime === 'image/webp' ? '.webp'
+    : mime === 'image/heic' ? '.heic'
+    : mime === 'image/heif' ? '.heif'
+    : '';
+  return `${safe}_${unique}${ext}`;
+};
+
+const mimeFromName = (name) => {
+  const n = String(name || '').toLowerCase();
+  if (n.endsWith('.pdf')) return 'application/pdf';
+  if (n.endsWith('.png')) return 'image/png';
+  if (n.endsWith('.webp')) return 'image/webp';
+  if (n.endsWith('.heic')) return 'image/heic';
+  if (n.endsWith('.heif')) return 'image/heif';
+  if (n.endsWith('.jpg') || n.endsWith('.jpeg')) return 'image/jpeg';
+  return 'application/octet-stream';
+};
+
+/**
+ * Upload a receipt/invoice file. Persists the Storage object path (never a signed URL).
+ * Path: {projectId}/{taskId}/{paymentId}/{safeFilename}
+ */
+export const uploadPaymentAttachment = async ({ projectId, taskId, paymentId, file }) => {
+  const name = file?.name || 'receipt';
+  const mime = file?.type || mimeFromName(name);
+  const stored = uniqueStoredName(name, mime);
+  const path = `${projectId}/${taskId}/${paymentId}/${stored}`;
+  const { error } = await supabase.storage.from(RECEIPTS_BUCKET).upload(path, file, {
+    contentType: mime,
+    upsert: false,
+  });
+  if (error) throw error;
+  return { id: uid(), path, name, mime };
+};
+
+/** Time-limited URL for viewing; do not persist this on the payment object. */
+export const signedUrlFor = async (path) => {
+  const { data, error } = await supabase.storage.from(RECEIPTS_BUCKET).createSignedUrl(path, SIGNED_URL_TTL);
+  if (error) throw error;
+  return data.signedUrl;
+};
+
+/** Remove a file from storage. Missing objects are ignored. */
+export const removePaymentAttachment = async (path) => {
+  if (!path) return;
+  const { error } = await supabase.storage.from(RECEIPTS_BUCKET).remove([path]);
+  if (!error) return;
+  const status = String(error.statusCode ?? error.status ?? '');
+  const msg = String(error.message || error.error || '').toLowerCase();
+  if (status === '404' || msg.includes('not found') || msg.includes('not exist')) return;
+  throw error;
+};
