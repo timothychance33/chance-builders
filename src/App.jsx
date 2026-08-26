@@ -1156,9 +1156,34 @@ function Financials({project,onUpdate}){
   );
 }
 
+function AddressField({value,onChange}){
+  return (
+    <div className="fld">
+      <label className="lbl">Address</label>
+      <input className="inp" placeholder="e.g. 2403 Tilman Dr, Bossier, LA 71111" value={value||""} onChange={e=>onChange(e.target.value)}/>
+    </div>
+  );
+}
+
+function TypeToggle({isSupplier,onChange}){
+  return (
+    <div className="fld">
+      <label className="lbl">Type</label>
+      <div style={{display:"flex",gap:8}}>
+        {[{v:false,l:"Sub"},{v:true,l:"Supplier"}].map(({v,l})=>{
+          const on=!!isSupplier===v;
+          return (
+            <button key={l} type="button" onClick={()=>onChange(v)} style={{flex:1,padding:"8px",border:`1px solid ${on?"var(--gold)":"var(--border)"}`,borderRadius:8,background:on?"rgba(200,164,86,.1)":"transparent",color:on?"var(--gold)":"var(--muted)",fontFamily:"'DM Sans',sans-serif",fontSize:13,cursor:"pointer"}}>{l}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── SUBS ───────────────────────────────────────────────────────────────────
 function Subs({contractors,onUpdate}){
-  const EMPTY_FORM={name:"",trade:"",phone:"",email:"",notes:"",rating:0,wouldUseAgain:true,
+  const EMPTY_FORM={name:"",trade:"",phone:"",email:"",address:"",notes:"",rating:0,wouldUseAgain:true,
     // W-9
     w9OnFile:false,w9Date:"",ein:"",businessType:"",w9Notes:"",
     // Workers' Comp
@@ -1177,6 +1202,8 @@ function Subs({contractors,onUpdate}){
   const add=()=>{
     if(!form.name.trim()) return;
     const c={id:uid(),...form,createdAt:new Date().toISOString()};
+    if(!c.address) delete c.address;
+    if(!c.isSupplier) delete c.isSupplier;
     onUpdate([...contractors,c], c, null);
     setModal(false);setForm(EMPTY_FORM);setSubTab("info");
   };
@@ -1202,11 +1229,15 @@ function Subs({contractors,onUpdate}){
     return issues;
   };
 
-  const filtered=contractors
-    .filter(c=>c.name.toLowerCase().includes(search.toLowerCase())||c.trade.toLowerCase().includes(search.toLowerCase()))
+  const subs=(contractors||[]).filter(c=>!c.isSupplier);
+  const filtered=subs
+    .filter(c=>{
+      const q=search.toLowerCase();
+      return (c.name||"").toLowerCase().includes(q)||(c.trade||"").toLowerCase().includes(q)||(c.address||"").toLowerCase().includes(q);
+    })
     .filter(c=>filter==="all"?true:filter==="issues"?complianceIssues(c).length>0:true);
 
-  const totalIssues=contractors.reduce((s,c)=>s+complianceIssues(c).length,0);
+  const totalIssues=subs.reduce((s,c)=>s+complianceIssues(c).length,0);
   const detailSub=contractors.find(c=>c.id===detailId);
 
   return (
@@ -1226,7 +1257,7 @@ function Subs({contractors,onUpdate}){
 
       <div style={{padding:"0 13px 9px"}}><input className="inp" placeholder="Search by name or trade..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
 
-      {filtered.length===0&&<div className="card" style={{textAlign:"center",padding:28,color:"var(--muted)",fontSize:12}}>{contractors.length===0?"No subs added yet.":"No results."}</div>}
+      {filtered.length===0&&<div className="card" style={{textAlign:"center",padding:28,color:"var(--muted)",fontSize:12}}>{subs.length===0?"No subs added yet.":"No results."}</div>}
 
       {filtered.map(c=>{
         const issues=complianceIssues(c);
@@ -1242,6 +1273,7 @@ function Subs({contractors,onUpdate}){
                 </div>
                 {c.rating>0&&<div style={{display:"flex",gap:2,marginTop:5}}>{[1,2,3,4,5].map(s=><span key={s} style={{fontSize:13,color:s<=c.rating?"var(--gold)":"var(--border)"}}>★</span>)}</div>}
                 {c.phone&&<div style={{display:"flex",alignItems:"center",gap:5,marginTop:6,fontSize:12,color:"var(--muted)"}} onClick={e=>e.stopPropagation()}><Ic.Phone/><a href={`tel:${c.phone}`} style={{color:"var(--text)",textDecoration:"none"}}>{c.phone}</a></div>}
+                {c.address&&<div style={{fontSize:11,color:"var(--muted)",marginTop:4}}>{c.address}</div>}
                 {/* Compliance badges */}
                 <div style={{display:"flex",gap:5,marginTop:7,flexWrap:"wrap"}}>
                   <span className={`tag ${c.w9OnFile?"tg":"tr"}`} style={{fontSize:9}}>W-9 {c.w9OnFile?"✓":"Missing"}</span>
@@ -1269,6 +1301,8 @@ function Subs({contractors,onUpdate}){
             <div><label className="lbl">Phone</label><input className="inp" type="tel" placeholder="(318) 555-0100" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></div>
             <div><label className="lbl">Email</label><input className="inp" type="email" placeholder="sub@email.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></div>
           </div>
+          <AddressField value={form.address} onChange={address=>setForm({...form,address})}/>
+          <TypeToggle isSupplier={form.isSupplier} onChange={isSupplier=>setForm({...form,isSupplier})}/>
           <div className="fld"><label className="lbl">Notes</label><textarea className="inp" rows={2} placeholder="e.g. Reliable, 30-day payment terms" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} style={{resize:"vertical"}}/></div>
           <div className="fld"><label className="lbl">Rating</label><div className="stars">{[1,2,3,4,5].map(s=><span key={s} className={`star${s<=form.rating?" on":""}`} onClick={()=>setForm({...form,rating:s})}>★</span>)}</div></div>
           <div className="fld"><label className="lbl">Would Use Again?</label>
@@ -1357,6 +1391,8 @@ function SubDetail({sub,onUpdate,BIZ_TYPES,TRADES,wcExpired,wcExpiringSoon}){
           <div><label className="lbl">Phone</label><input className="inp" value={draft.phone||""} onChange={e=>setDraft({...draft,phone:e.target.value})}/></div>
           <div><label className="lbl">Email</label><input className="inp" value={draft.email||""} onChange={e=>setDraft({...draft,email:e.target.value})}/></div>
         </div>
+        <AddressField value={draft.address} onChange={address=>setDraft({...draft,address})}/>
+        <TypeToggle isSupplier={draft.isSupplier} onChange={isSupplier=>setDraft({...draft,isSupplier})}/>
         <div className="fld"><label className="lbl">Notes</label><textarea className="inp" rows={2} value={draft.notes||""} onChange={e=>setDraft({...draft,notes:e.target.value})} style={{resize:"vertical"}}/></div>
         <div className="fld"><label className="lbl">Rating</label><div className="stars">{[1,2,3,4,5].map(s=><span key={s} className={`star${s<=(draft.rating||0)?" on":""}`} onClick={()=>setDraft({...draft,rating:s})}>★</span>)}</div></div>
         <div className="fld"><label className="lbl">Would Use Again?</label>
@@ -1432,19 +1468,25 @@ function Directory({contractors,onUpdate}){
 
 function Suppliers({contractors,onUpdate}){
   const suppliers=(contractors||[]).filter(c=>c.isSupplier);
-  const EMPTY={name:"",category:"",repName:"",phone:"",email:"",accountNum:"",creditTerms:"",leadTime:"",notes:"",isSupplier:true};
+  const EMPTY={name:"",category:"",repName:"",phone:"",email:"",address:"",accountNum:"",creditTerms:"",leadTime:"",notes:"",isSupplier:true};
   const [modal,setModal]=useState(false);
+  const [detailId,setDetailId]=useState(null);
   const [form,setForm]=useState(EMPTY);
   const [search,setSearch]=useState("");
   const CATS=["Lumber / Building Materials","Concrete & Masonry","Plumbing Supply","Electrical Supply","HVAC Supply","Flooring","Cabinetry & Millwork","Countertops","Brick & Stone","Roofing Materials","Hardware & Fasteners","Paint & Finishes","Windows & Doors","Landscaping & Sod","Other"];
 
   const add=()=>{
     if(!form.name.trim()) return;
-    onUpdate([...contractors,{id:uid(),...form,createdAt:new Date().toISOString()}],{id:uid(),...form},null);
+    const c={id:uid(),...form,createdAt:new Date().toISOString()};
+    if(!c.address) delete c.address;
+    if(!c.isSupplier) delete c.isSupplier;
+    onUpdate([...contractors,c],c,null);
     setModal(false);setForm(EMPTY);
   };
   const del=(id)=>{if(confirm("Remove this supplier?"))onUpdate(contractors.filter(c=>c.id!==id),null,id);};
-  const filtered=suppliers.filter(c=>(c.name+c.category+c.repName).toLowerCase().includes(search.toLowerCase()));
+  const updateSup=(id,updates)=>{ const updated=contractors.map(c=>c.id===id?{...c,...updates}:c); onUpdate(updated, updated.find(c=>c.id===id), null); };
+  const filtered=suppliers.filter(c=>((c.name||"")+(c.category||"")+(c.repName||"")+(c.address||"")).toLowerCase().includes(search.toLowerCase()));
+  const detailSup=contractors.find(c=>c.id===detailId);
 
   return (
     <div>
@@ -1455,7 +1497,7 @@ function Suppliers({contractors,onUpdate}){
       <div style={{padding:"0 13px 9px"}}><input className="inp" placeholder="Search suppliers..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
       {filtered.length===0&&<div className="card" style={{textAlign:"center",padding:28,color:"var(--muted)",fontSize:12}}>{suppliers.length===0?"No suppliers added yet.":"No results."}</div>}
       {filtered.map(c=>(
-        <div key={c.id} className="card" style={{padding:13}}>
+        <div key={c.id} className="card" style={{padding:13,cursor:"pointer"}} onClick={()=>setDetailId(c.id)}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div style={{flex:1}}>
               <div style={{fontWeight:600,fontSize:14}}>{c.name}</div>
@@ -1463,6 +1505,7 @@ function Suppliers({contractors,onUpdate}){
               {c.repName&&<div style={{fontSize:12,color:"var(--muted)",marginTop:6}}>Rep: {c.repName}</div>}
               {c.phone&&<div style={{display:"flex",alignItems:"center",gap:5,marginTop:5,fontSize:12,color:"var(--muted)"}}><Ic.Phone/><a href={`tel:${c.phone}`} style={{color:"var(--text)",textDecoration:"none"}}>{c.phone}</a></div>}
               {c.email&&<div style={{fontSize:11,color:"var(--muted)",marginTop:3}}>{c.email}</div>}
+              {c.address&&<div style={{fontSize:11,color:"var(--muted)",marginTop:3}}>{c.address}</div>}
               {c.accountNum&&<div style={{fontSize:11,color:"var(--muted)",marginTop:3}}>Account #: <b style={{color:"var(--text)"}}>{c.accountNum}</b></div>}
               <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
                 {c.creditTerms&&<span className="tag tb" style={{fontSize:9}}>{c.creditTerms}</span>}
@@ -1470,7 +1513,7 @@ function Suppliers({contractors,onUpdate}){
               </div>
               {c.notes&&<div style={{fontSize:11,color:"var(--muted)",marginTop:5,fontStyle:"italic"}}>{c.notes}</div>}
             </div>
-            <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer"}} onClick={()=>del(c.id)}><Ic.Trash/></button>
+            <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer"}} onClick={e=>{e.stopPropagation();del(c.id);}}><Ic.Trash/></button>
           </div>
         </div>
       ))}
@@ -1482,6 +1525,8 @@ function Suppliers({contractors,onUpdate}){
           <div><label className="lbl">Phone</label><input className="inp" type="tel" placeholder="(318) 555-0100" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></div>
         </div>
         <div className="fld"><label className="lbl">Email</label><input className="inp" type="email" placeholder="rep@supplier.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></div>
+        <AddressField value={form.address} onChange={address=>setForm({...form,address})}/>
+        <TypeToggle isSupplier={form.isSupplier} onChange={isSupplier=>setForm({...form,isSupplier})}/>
         <div className="row2" style={{gap:8,marginBottom:12}}>
           <div><label className="lbl">Account #</label><input className="inp" placeholder="e.g. CB-10042" value={form.accountNum} onChange={e=>setForm({...form,accountNum:e.target.value})}/></div>
           <div><label className="lbl">Credit Terms</label><input className="inp" placeholder="e.g. Net 30" value={form.creditTerms} onChange={e=>setForm({...form,creditTerms:e.target.value})}/></div>
@@ -1491,7 +1536,36 @@ function Suppliers({contractors,onUpdate}){
         <button className="btn" onClick={add}>Add Supplier</button>
         <button className="btg" onClick={()=>setModal(false)}>Cancel</button>
       </Modal>}
+      {detailSup&&<Modal title={detailSup.name} onClose={()=>setDetailId(null)}>
+        <SupplierDetail supplier={detailSup} onUpdate={(upd)=>updateSup(detailSup.id,upd)} CATS={CATS}/>
+        <button className="btg" onClick={()=>setDetailId(null)}>Close</button>
+      </Modal>}
     </div>
+  );
+}
+
+function SupplierDetail({supplier,onUpdate,CATS}){
+  const [draft,setDraft]=useState({...supplier});
+  const save=()=>onUpdate({...draft});
+  return (
+    <>
+      <div className="fld"><label className="lbl">Company Name</label><input className="inp" value={draft.name||""} onChange={e=>setDraft({...draft,name:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Category</label><select className="inp" value={draft.category||""} onChange={e=>setDraft({...draft,category:e.target.value})}><option value="">— Select —</option>{CATS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+      <div className="row2" style={{gap:8,marginBottom:12}}>
+        <div><label className="lbl">Rep Name</label><input className="inp" value={draft.repName||""} onChange={e=>setDraft({...draft,repName:e.target.value})}/></div>
+        <div><label className="lbl">Phone</label><input className="inp" value={draft.phone||""} onChange={e=>setDraft({...draft,phone:e.target.value})}/></div>
+      </div>
+      <div className="fld"><label className="lbl">Email</label><input className="inp" value={draft.email||""} onChange={e=>setDraft({...draft,email:e.target.value})}/></div>
+      <AddressField value={draft.address} onChange={address=>setDraft({...draft,address})}/>
+      <TypeToggle isSupplier={draft.isSupplier} onChange={isSupplier=>setDraft({...draft,isSupplier})}/>
+      <div className="row2" style={{gap:8,marginBottom:12}}>
+        <div><label className="lbl">Account #</label><input className="inp" value={draft.accountNum||""} onChange={e=>setDraft({...draft,accountNum:e.target.value})}/></div>
+        <div><label className="lbl">Credit Terms</label><input className="inp" value={draft.creditTerms||""} onChange={e=>setDraft({...draft,creditTerms:e.target.value})}/></div>
+      </div>
+      <div className="fld"><label className="lbl">Delivery Lead Time</label><input className="inp" value={draft.leadTime||""} onChange={e=>setDraft({...draft,leadTime:e.target.value})}/></div>
+      <div className="fld"><label className="lbl">Notes</label><textarea className="inp" rows={2} value={draft.notes||""} onChange={e=>setDraft({...draft,notes:e.target.value})} style={{resize:"vertical"}}/></div>
+      <button className="btn" onClick={save}>Save Changes</button>
+    </>
   );
 }
 
