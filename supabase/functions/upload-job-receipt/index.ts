@@ -146,11 +146,12 @@ Deno.serve(async (req) => {
     const taskId = requireId((body as Record<string, unknown>).taskId, "taskId");
     const paymentId = requireId((body as Record<string, unknown>).paymentId, "paymentId");
 
-    const filename = String(
+    const rawName = String(
       (body as Record<string, unknown>).filename ??
         (body as Record<string, unknown>).name ??
         "receipt",
-    );
+    ).trim();
+    const filename = rawName || "receipt";
     const fileBase64 = String(
       (body as Record<string, unknown>).fileBase64 ??
         (body as Record<string, unknown>).file ??
@@ -186,7 +187,7 @@ Deno.serve(async (req) => {
     }
 
     // App attachment object — name is the original filename, not the stored unique name.
-    return json(200, { id: uid(), path, name: filename || "receipt", mime });
+    return json(200, { id: uid(), path, name: filename, mime });
   } catch (e) {
     const status = typeof (e as { status?: number })?.status === "number"
       ? (e as { status: number }).status
