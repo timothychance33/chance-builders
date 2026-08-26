@@ -1,0 +1,6 @@
+# Chance Builders — Edge Functions only.
+# The app itself talks to the hosted project; this folder ships helper functions.
+
+[functions.upload-job-receipt]
+# Same as Tim's cron/webhook functions: no JWT. Auth is x-upload-secret.
+verify_jwt = false
