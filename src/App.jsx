@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor, signOut, uploadPaymentAttachment, uploadFinancingAttachment, signedUrlFor, removePaymentAttachment } from "./supabase";
-import { collectCostGroups, collectJobReceipts, FIN_TYPE_LABELS, FIN_TYPE_OPTIONS, partitionJobCosts, sumAmounts, sumCostGroups } from "./costGroups";
+import { collectCostGroups, collectJobReceipts, collectUtilityBills, FIN_TYPE_LABELS, FIN_TYPE_OPTIONS, partitionJobCosts, sumAmounts, sumCostGroups } from "./costGroups";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const num = (s) => { const v = parseFloat(s); return isNaN(v) ? 0 : v; };
@@ -443,6 +443,65 @@ function CostDrilldown({title, groups, onClose}){
                 </div>
               </>
             : <div style={{fontSize:10,color:"var(--muted)",marginTop:8,fontStyle:"italic"}}>No receipts on this task</div>}
+        </div>
+      ))}
+    </Modal>
+  );
+}
+
+function UtilityDrilldown({title, entries, onClose, busy, err, onAdd, onType, onDelete, onAddFiles, onRemoveAtt}){
+  const total=sumAmounts(entries);
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:4}}>
+        <div style={{fontSize:22,fontWeight:700,color:"var(--gold)"}}>{fmt(total)}</div>
+        <button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={onAdd}>+ Add</button>
+      </div>
+      <div style={{fontSize:11,color:"var(--muted)",marginBottom:14,lineHeight:1.4}}>Utility bills (electric / water / gas). Photos are on each bill — same signed URL as financing receipts.</div>
+      {entries.length===0&&<div style={{fontSize:12,color:"var(--muted)",textAlign:"center",padding:"16px 0"}}>No utility bills yet.</div>}
+      {entries.map(f=>(
+        <div key={f.id} className="c2" style={{marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"}}>
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{fontSize:13,fontWeight:600}}>{f.description||"Untitled"}</div>
+              {f.date?<div style={{fontSize:10,color:"var(--muted)",marginTop:2}}>{f.date}</div>:null}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--red)"}}>{fmt(f.amount)}</span>
+              <button type="button" style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer"}} onClick={()=>onDelete(f.id)} aria-label={`Delete ${f.description||"utility"}`}><Ic.Trash/></button>
+            </div>
+          </div>
+          {(f.attachments||[]).length>0
+            ? <div className="rcpt-row">
+                {(f.attachments||[]).map(att=>(
+                  <ReceiptThumb key={att.id} att={att} onOpen={openReceipt} onDelete={a=>onRemoveAtt(f.id,a)}/>
+                ))}
+              </div>
+            : <div style={{fontSize:10,color:"var(--muted)",marginTop:8,fontStyle:"italic"}}>No photo on this bill</div>}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,flexWrap:"wrap"}}>
+            <label className="bto rcpt-add" style={{fontSize:10,padding:"4px 8px",marginTop:0}}>
+              <Ic.Cam/>
+              {busy[f.id]?"Uploading…":"Add photo"}
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                capture="environment"
+                multiple
+                disabled={!!busy[f.id]}
+                onChange={e=>{ onAddFiles(f.id, e.target.files); e.target.value=""; }}
+              />
+            </label>
+            <select
+              className="inp fin-type"
+              aria-label={`Type for ${f.description||"utility"}`}
+              value={FIN_TYPE_OPTIONS.some(o=>o.value===f.type)?f.type:"utility"}
+              onChange={e=>onType(f.id,e.target.value)}
+              style={{fontSize:11,padding:"5px 8px",flex:1,minWidth:0}}
+            >
+              {FIN_TYPE_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          {err[f.id]&&<div style={{fontSize:11,color:"var(--red)",marginTop:4}}>{err[f.id]}</div>}
         </div>
       ))}
     </Modal>
@@ -1236,7 +1295,7 @@ function Financials({project,onUpdate}){
           {l:"Hard Cost Total",v:hardCost,c:"var(--text)",bold:true},
           {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
-          {l:`Utilities (${utilityEntries.length})`,v:utilityTotal,c:utilityTotal>0?"var(--red)":"var(--muted)"},
+          {l:"Utilities",v:utilityTotal,c:utilityTotal>0?"var(--red)":"var(--muted)",drill:"utility"},
           {l:"Cost to Date",v:costToDate,c:"var(--text)",bold:true},
           {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
           {l:"Budget (from estimates)",v:budget,c:"var(--gold)",blankZero:true},
@@ -1248,7 +1307,7 @@ function Financials({project,onUpdate}){
           {l:"Rehab Total",v:hardCost,c:"var(--text)",bold:true},
           {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
-          {l:`Utilities (${utilityEntries.length})`,v:utilityTotal,c:utilityTotal>0?"var(--red)":"var(--muted)"},
+          {l:"Utilities",v:utilityTotal,c:utilityTotal>0?"var(--red)":"var(--muted)",drill:"utility"},
           {l:"Total Invested",v:flipTotal,c:"var(--text)",bold:true},
           {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
         ]:[
@@ -1259,7 +1318,7 @@ function Financials({project,onUpdate}){
           {l:`Builder's Premium (${project.markupPct||10}%)`,v:markup,c:"var(--gold)"},
           {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
-          {l:`Utilities (${utilityEntries.length})`,v:utilityTotal,c:utilityTotal>0?"var(--red)":"var(--muted)"},
+          {l:"Utilities",v:utilityTotal,c:utilityTotal>0?"var(--red)":"var(--muted)",drill:"utility"},
           {l:"Total Project Cost",v:totalCost,c:"var(--text)",bold:true},
           {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
         ]).map(({l,v,c,bold,field,blankZero,drill})=>(
@@ -1283,18 +1342,6 @@ function Financials({project,onUpdate}){
             :<div style={{display:"flex",gap:5}}><input className="inp" type="number" value={markupInput} onChange={e=>setMarkupInput(e.target.value)} style={{width:70,padding:"4px 8px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"4px 10px",fontSize:11}} onClick={()=>{onUpdate({...project,markupPct:markupInput});setEditMarkup(false);}}>Save</button></div>}
         </div>}
 
-        <JobCostGroup
-          title="Utilities"
-          empty="No utility bills logged yet. To move a SWEPCO / electric row here, change its Type to Utility."
-          entries={utilityEntries}
-          busy={finBusy}
-          err={finErr}
-          onAdd={()=>openFinModal("utility")}
-          onType={updateFinType}
-          onDelete={deleteFin}
-          onAddFiles={addFinAttachments}
-          onRemoveAtt={removeFinAttachment}
-        />
         <JobCostGroup
           title="Financing Costs"
           empty="No financing costs logged yet"
@@ -1391,6 +1438,24 @@ function Financials({project,onUpdate}){
         <button className="btg" onClick={()=>setCoModal(false)}>Cancel</button>
       </Modal>}
 
+      {costDrill&&costDrill.kind==="utility"&&<UtilityDrilldown
+        title={costDrill.title}
+        entries={collectUtilityBills(project)}
+        onClose={()=>setCostDrill(null)}
+        busy={finBusy}
+        err={finErr}
+        onAdd={()=>openFinModal("utility")}
+        onType={updateFinType}
+        onDelete={deleteFin}
+        onAddFiles={addFinAttachments}
+        onRemoveAtt={removeFinAttachment}
+      />}
+      {costDrill&&costDrill.kind!=="utility"&&<CostDrilldown
+        title={costDrill.title}
+        groups={collectCostGroups(project,{kind:costDrill.kind,phaseId:costDrill.phaseId})}
+        onClose={()=>setCostDrill(null)}
+      />}
+
       {finModal&&<Modal title={finForm.type==="utility"?"Add Utility":"Add Financing Cost"} onClose={()=>{setFinModal(false);setFinFiles([]);}}>
         <div className="fld"><label className="lbl">Description *</label><input className="inp" placeholder={finForm.type==="utility"?"e.g. SWEPCO — June 2026":"e.g. Construction Loan Interest — May 2025"} value={finForm.description} onChange={e=>setFinForm({...finForm,description:e.target.value})}/></div>
         <div className="fld"><label className="lbl">Amount ($) *</label><input className="inp" type="number" placeholder="e.g. 1850" value={finForm.amount} onChange={e=>setFinForm({...finForm,amount:e.target.value})}/></div>
@@ -1411,12 +1476,6 @@ function Financials({project,onUpdate}){
         <button className="btn" onClick={addFin}>{finForm.type==="utility"?"Add Utility":"Add Financing Cost"}</button>
         <button className="btg" onClick={()=>{setFinModal(false);setFinFiles([]);}}>Cancel</button>
       </Modal>}
-
-      {costDrill&&<CostDrilldown
-        title={costDrill.title}
-        groups={collectCostGroups(project,{kind:costDrill.kind,phaseId:costDrill.phaseId})}
-        onClose={()=>setCostDrill(null)}
-      />}
     </div>
   );
 }
