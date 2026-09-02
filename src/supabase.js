@@ -143,7 +143,7 @@ export const uploadPaymentAttachment = async ({ projectId, taskId, paymentId, fi
   return uploadReceiptFile(path, file, mime, name);
 };
 
-/** Financing / SWEPCO-style bills. Path: {projectId}/financing/{financingId}/{safeFilename} */
+/** Financing and utility bills (SWEPCO). Path: {projectId}/financing/{financingId}/{safeFilename} */
 export const uploadFinancingAttachment = async ({ projectId, financingId, file }) => {
   const name = file?.name || 'receipt';
   const mime = file?.type || mimeFromName(name);
