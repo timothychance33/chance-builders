@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor, signOut, uploadPaymentAttachment, signedUrlFor, removePaymentAttachment } from "./supabase";
+import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor, signOut, uploadPaymentAttachment, uploadFinancingAttachment, signedUrlFor, removePaymentAttachment } from "./supabase";
+import { collectCostGroups, collectJobReceipts, sumCostGroups } from "./costGroups";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const num = (s) => { const v = parseFloat(s); return isNaN(v) ? 0 : v; };
@@ -334,6 +335,9 @@ select.inp option{background:#1c2230}
 .rcpt-del svg{width:10px;height:10px}
 .rcpt-add{display:inline-flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer}
 .rcpt-add input{display:none}
+.fin-tap{cursor:pointer}
+.fin-tap:active{opacity:.75}
+.fin-chev{color:var(--muted);font-size:14px;line-height:1;margin-left:4px}
 `;
 
 // ── ICONS ──────────────────────────────────────────────────────────────────
@@ -375,27 +379,117 @@ function Modal({children,onClose,title}){
 const isPreviewableImage = (mime) => !!mime && mime.startsWith("image/") && !/heic|heif/i.test(mime);
 const isPdf = (att) => (att.mime||"") === "application/pdf" || /\.pdf$/i.test(att.name||"");
 
+async function openReceipt(att){
+  try{
+    const url=await signedUrlFor(att.path);
+    window.open(url,"_blank","noopener,noreferrer");
+  }catch(e){
+    console.error(e);
+    alert("Could not open receipt. Check your connection.");
+  }
+}
+
 function ReceiptThumb({att, onOpen, onDelete}){
   const [url,setUrl]=useState(null);
+  const [failed,setFailed]=useState(false);
   useEffect(()=>{
     if(!isPreviewableImage(att.mime)) return;
     let cancelled=false;
-    signedUrlFor(att.path).then(u=>{ if(!cancelled) setUrl(u); }).catch(()=>{});
+    setUrl(null); setFailed(false);
+    signedUrlFor(att.path).then(u=>{ if(!cancelled) setUrl(u); }).catch(()=>{ if(!cancelled) setFailed(true); });
     return ()=>{ cancelled=true; };
   },[att.path, att.mime]);
   const label=(att.name||"file").length>22?(att.name||"file").slice(0,20)+"…":(att.name||"file");
+  const showImage=isPreviewableImage(att.mime)&&!failed;
   return (
     <div className="rcpt-wrap">
-      {isPreviewableImage(att.mime)
+      {showImage
         ? (url
-            ? <img className="rcpt-th" src={url} alt={att.name||"Receipt"} onClick={()=>onOpen(att)}/>
+            ? <img className="rcpt-th" src={url} alt={att.name||"Receipt"} onClick={()=>onOpen(att)} onError={()=>setFailed(true)}/>
             : <div className="rcpt-ph"/>)
         : <button type="button" className="rcpt-chip" onClick={()=>onOpen(att)} title={att.name}>
             <span style={{color:"var(--gold)",fontWeight:700,flexShrink:0}}>{isPdf(att)?"PDF":"FILE"}</span>
             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label}</span>
           </button>
       }
-      <button type="button" className="rcpt-del" aria-label="Remove attachment" onClick={e=>{e.stopPropagation(); onDelete(att);}}><Ic.X/></button>
+      {onDelete&&<button type="button" className="rcpt-del" aria-label="Remove attachment" onClick={e=>{e.stopPropagation(); onDelete(att);}}><Ic.X/></button>}
+    </div>
+  );
+}
+
+const FIN_TYPE_LABELS={construction:"Construction Loan",lot:"Lot Loan",other:"Other Financing"};
+
+function CostDrilldown({title, groups, onClose}){
+  const total=sumCostGroups(groups);
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div style={{fontSize:22,fontWeight:700,color:"var(--gold)",marginBottom:4}}>{fmt(total)}</div>
+      <div style={{fontSize:11,color:"var(--muted)",marginBottom:14,lineHeight:1.4}}>Line items from tasks. Receipts are every photo on that task’s payments — they are not linked to a single line.</div>
+      {groups.length===0&&<div style={{fontSize:12,color:"var(--muted)",textAlign:"center",padding:"16px 0"}}>No matching line items.</div>}
+      {groups.map(g=>(
+        <div key={g.taskId} className="c2" style={{marginBottom:10}}>
+          <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{g.phaseName}</div>
+          <div style={{fontSize:13,fontWeight:600,margin:"2px 0 8px"}}>{g.taskName}</div>
+          {g.lines.map(li=>(
+            <div key={li.id} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"5px 0",borderBottom:"1px solid var(--border)"}}>
+              <span style={{fontSize:12,color:"var(--text)"}}>{li.description}</span>
+              <span style={{fontSize:12,fontWeight:600,flexShrink:0}}>{fmt(li.amount)}</span>
+            </div>
+          ))}
+          {g.receipts.length>0
+            ? <>
+                <div style={{fontSize:10,color:"var(--muted)",marginTop:10,textTransform:"uppercase",letterSpacing:".4px"}}>Task receipts</div>
+                <div className="rcpt-row">
+                  {g.receipts.map(att=><ReceiptThumb key={att.id} att={att} onOpen={openReceipt}/>)}
+                </div>
+              </>
+            : <div style={{fontSize:10,color:"var(--muted)",marginTop:8,fontStyle:"italic"}}>No receipts on this task</div>}
+        </div>
+      ))}
+    </Modal>
+  );
+}
+
+function JobReceipts({project}){
+  const {groups, financing}=collectJobReceipts(project);
+  const empty=!groups.length&&!financing.length;
+  return (
+    <div className="card" style={{borderRadius:"0 0 12px 12px",marginTop:0}}>
+      {empty&&<div style={{fontSize:12,color:"var(--muted)",textAlign:"center",padding:"12px 0",lineHeight:1.5}}>No receipt photos on this job yet. Add them on Checklist → task → Payments, or on a financing cost.</div>}
+      {groups.map(g=>(
+        <div key={g.taskId} style={{marginBottom:14,paddingBottom:12,borderBottom:"1px solid var(--border)"}}>
+          <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{g.phaseName}</div>
+          <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>{g.taskName}</div>
+          {g.payments.map(p=>(
+            <div key={p.id} style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11,color:"var(--muted)",marginBottom:6}}>
+                <span>{[p.date,p.checkNum,p.note].filter(Boolean).join(" · ")}</span>
+                <span style={{color:"var(--text)",fontWeight:600,flexShrink:0}}>{fmt(p.amount)}</span>
+              </div>
+              <div className="rcpt-row" style={{marginTop:0}}>
+                {p.attachments.map(att=><ReceiptThumb key={att.id} att={att} onOpen={openReceipt}/>)}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+      {financing.length>0&&<>
+        <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",margin:"4px 0 10px"}}>Other financing</div>
+        {financing.map(f=>(
+          <div key={f.id} style={{marginBottom:12,paddingBottom:10,borderBottom:"1px solid var(--border)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:6}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:600}}>{f.description}</div>
+                <div style={{fontSize:10,color:"var(--muted)"}}>{FIN_TYPE_LABELS[f.type]||"Financing"}{f.date?` · ${f.date}`:""}</div>
+              </div>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--red)",flexShrink:0}}>{fmt(f.amount)}</span>
+            </div>
+            <div className="rcpt-row" style={{marginTop:0}}>
+              {(f.attachments||[]).map(att=><ReceiptThumb key={att.id} att={att} onOpen={openReceipt}/>)}
+            </div>
+          </div>
+        ))}
+      </>}
     </div>
   );
 }
@@ -409,9 +503,19 @@ export default function App({ session }) {
   const [loaded,setLoaded]=useState(false);
   const [error,setError]=useState(null);
   const [saving,setSaving]=useState(false);
+  const fixtureMode=import.meta.env.DEV && new URLSearchParams(typeof window!=="undefined"?window.location.search:"").get("fixture")==="parkers";
 
   // ── Load from Supabase on mount ──
   useEffect(()=>{
+    if(fixtureMode){
+      import("./fixtures/parkers.js").then(({parkersProject})=>{
+        setProjects([parkersProject]);
+        setActiveId(parkersProject.id);
+        setTab("fin");
+        setLoaded(true);
+      });
+      return;
+    }
     Promise.all([loadProjects(), loadContractors()])
       .then(([projs, conts])=>{ setProjects(projs); setContractors(conts); setLoaded(true); })
       .catch(e=>{ console.error(e); setError("Could not connect to database. Check your connection."); setLoaded(true); });
@@ -420,12 +524,17 @@ export default function App({ session }) {
   // ── Project ops ──
   const setProj = useCallback(async (updated, projectToSave) => {
     setProjects(updated);
+    if(fixtureMode) return;
     if(projectToSave){ setSaving(true); try{ await saveProject(projectToSave); }catch(e){ console.error(e); } finally{ setSaving(false); } }
-  },[]);
+  },[fixtureMode]);
 
   const updateActive = useCallback((u)=>{ setProj(projects.map(p=>p.id===u.id?u:p), u); },[projects, setProj]);
 
-  const removeProject = useCallback(async (id)=>{ setProjects(prev=>prev.filter(p=>p.id!==id)); await deleteProject(id); },[]);
+  const removeProject = useCallback(async (id)=>{
+    if(fixtureMode) return;
+    setProjects(prev=>prev.filter(p=>p.id!==id));
+    await deleteProject(id);
+  },[fixtureMode]);
 
   // ── Contractor ops ──
   const setCont = useCallback(async (updated, contToSave, contToDelete) => {
@@ -643,16 +752,6 @@ function Checklist({project,contractors,onUpdate}){
   const addPayment=()=>setDraft({...draft,payments:[...draft.payments,{id:uid(),amount:"",date:today(),checkNum:"",lienWaiver:false,note:"",attachments:[]}]});
   const updPay=(id,k,v)=>setDraft({...draft,payments:draft.payments.map(p=>p.id===id?{...p,[k]:v}:p)});
   const delPay=(id)=>setDraft({...draft,payments:draft.payments.filter(p=>p.id!==id)});
-
-  const openReceipt=async (att)=>{
-    try{
-      const url=await signedUrlFor(att.path);
-      window.open(url,"_blank","noopener,noreferrer");
-    }catch(e){
-      console.error(e);
-      alert("Could not open receipt. Check your connection.");
-    }
-  };
 
   const addAttachments=async (paymentId, fileList)=>{
     const files=Array.from(fileList||[]);
@@ -904,6 +1003,10 @@ function Financials({project,onUpdate}){
   const [editHold,setEditHold]=useState(false);
   const [holdInput,setHoldInput]=useState(project.holdCosts||"");
   const [finTab,setFinTab]=useState("summary");
+  const [costDrill,setCostDrill]=useState(null);
+  const [finBusy,setFinBusy]=useState({});
+  const [finErr,setFinErr]=useState({});
+  const [finFiles,setFinFiles]=useState([]);
 
   const flip=isFlip(project.type);
   const costOnly=isCostTracking(project.type);
@@ -943,12 +1046,75 @@ function Financials({project,onUpdate}){
   const updateCOStatus=(id,status)=>onUpdate({...project,changeOrders:cos.map(co=>co.id===id?{...co,status}:co)});
   const deleteCO=(id)=>onUpdate({...project,changeOrders:cos.filter(co=>co.id!==id)});
 
-  const addFin=()=>{
+  const addFin=async ()=>{
     if(!finForm.description||!finForm.amount) return;
-    onUpdate({...project,financingCosts:[...financingEntries,{id:uid(),...finForm,createdAt:new Date().toISOString()}]});
-    setFinModal(false);setFinForm({description:"",amount:"",date:"",type:"construction"});
+    const id=uid();
+    const files=Array.from(finFiles||[]);
+    const attachments=[];
+    try{
+      for(const file of files){
+        if(file.size>10*1024*1024){
+          alert(`${file.name||"File"} is over 10MB`);
+          continue;
+        }
+        attachments.push(await uploadFinancingAttachment({projectId:project.id,financingId:id,file}));
+      }
+    }catch(err){
+      console.error(err);
+      alert(err.message||"Upload failed");
+    }
+    onUpdate({...project,financingCosts:[...financingEntries,{id,...finForm,attachments,createdAt:new Date().toISOString()}]});
+    setFinModal(false);setFinForm({description:"",amount:"",date:"",type:"construction"});setFinFiles([]);
   };
-  const deleteFin=(id)=>onUpdate({...project,financingCosts:financingEntries.filter(f=>f.id!==id)});
+  const deleteFin=async (id)=>{
+    const entry=financingEntries.find(f=>f.id===id);
+    onUpdate({...project,financingCosts:financingEntries.filter(f=>f.id!==id)});
+    for(const att of entry?.attachments||[]){
+      try{ await removePaymentAttachment(att.path); }catch(e){ console.error(e); }
+    }
+  };
+
+  const addFinAttachments=async (finId, fileList)=>{
+    const files=Array.from(fileList||[]);
+    if(!files.length) return;
+    setFinErr(e=>({...e,[finId]:""}));
+    setFinBusy(b=>({...b,[finId]:true}));
+    const added=[];
+    try{
+      for(const file of files){
+        if(file.size>10*1024*1024){
+          setFinErr(e=>({...e,[finId]:`${file.name||"File"} is over 10MB`}));
+          continue;
+        }
+        added.push(await uploadFinancingAttachment({projectId:project.id,financingId:finId,file}));
+      }
+      if(added.length){
+        onUpdate({
+          ...project,
+          financingCosts:financingEntries.map(f=>f.id===finId?{...f,attachments:[...(f.attachments||[]),...added]}:f),
+        });
+      }
+    }catch(err){
+      console.error(err);
+      setFinErr(e=>({...e,[finId]:err.message||"Upload failed"}));
+    }finally{
+      setFinBusy(b=>({...b,[finId]:false}));
+    }
+  };
+
+  const removeFinAttachment=async (finId, att)=>{
+    try{
+      await removePaymentAttachment(att.path);
+    }catch(err){
+      console.error(err);
+      setFinErr(e=>({...e,[finId]:"Could not delete file"}));
+      return;
+    }
+    onUpdate({
+      ...project,
+      financingCosts:financingEntries.map(f=>f.id===finId?{...f,attachments:(f.attachments||[]).filter(a=>a.id!==att.id)}:f),
+    });
+  };
 
   const COStatusColors={draft:"var(--muted)",presented:"var(--blue)",approved:"var(--green)",complete:"var(--gold)"};
   const COStatusLabels={draft:"Draft",presented:"Presented",approved:"Approved",complete:"Complete"};
@@ -956,14 +1122,14 @@ function Financials({project,onUpdate}){
   const phaseBD=project.phases.map(ph=>{
     const ts=ph.tasks;
     const lis=ts.flatMap(t=>t.lineItems||[]);
-    return{name:ph.short||ph.name,icon:ph.icon,labor:lis.reduce((s,li)=>s+num(li.labor),0),material:lis.reduce((s,li)=>s+num(li.material),0)};
+    return{id:ph.id,name:ph.short||ph.name,icon:ph.icon,labor:lis.reduce((s,li)=>s+num(li.labor),0),material:lis.reduce((s,li)=>s+num(li.material),0)};
   }).filter(ph=>ph.labor||ph.material);
 
   return (
     <div>
       <div className="tab-row" style={{margin:"10px 13px 0",borderRadius:"8px 8px 0 0",overflow:"hidden",border:"1px solid var(--border)"}}>
-        {["budget","summary","breakdown","change orders"].map(t=>(
-          <div key={t} className={`tab${finTab===t?" on":""}`} onClick={()=>setFinTab(t)} style={{textTransform:"capitalize",fontSize:10}}>{t}</div>
+        {[["budget","Budget"],["summary","Summary"],["breakdown","Breakdown"],["receipts","Receipts"],["change orders","COs"]].map(([id,l])=>(
+          <div key={id} className={`tab${finTab===id?" on":""}`} onClick={()=>setFinTab(id)} style={{fontSize:10}}>{l}</div>
         ))}
       </div>
 
@@ -990,8 +1156,8 @@ function Financials({project,onUpdate}){
         </>}
 
         {(costOnly?[
-          {l:"Labor Costs",v:laborTotal,c:"var(--text)"},
-          {l:"Material Costs",v:matTotal,c:"var(--text)"},
+          {l:"Labor Costs",v:laborTotal,c:"var(--text)",drill:"labor"},
+          {l:"Material Costs",v:matTotal,c:"var(--text)",drill:"material"},
           {l:"Hard Cost Total",v:hardCost,c:"var(--text)",bold:true},
           {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
@@ -1001,8 +1167,8 @@ function Financials({project,onUpdate}){
         ]:flip?[
           {l:"Purchase Price",v:purchasePrice,c:"var(--text)",field:"purchase"},
           {l:"Hold Costs (taxes, insurance, utilities, interest)",v:holdCosts,c:"var(--text)",field:"hold"},
-          {l:"Labor (Rehab)",v:laborTotal,c:"var(--text)"},
-          {l:"Material (Rehab)",v:matTotal,c:"var(--text)"},
+          {l:"Labor (Rehab)",v:laborTotal,c:"var(--text)",drill:"labor"},
+          {l:"Material (Rehab)",v:matTotal,c:"var(--text)",drill:"material"},
           {l:"Rehab Total",v:hardCost,c:"var(--text)",bold:true},
           {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
@@ -1010,17 +1176,17 @@ function Financials({project,onUpdate}){
           {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
         ]:[
           {l:project.type==="commercial"?"Site / Land Cost":"Lot / Land Cost",v:lotCost,c:"var(--text)",field:"lot"},
-          {l:"Labor Costs",v:laborTotal,c:"var(--text)"},
-          {l:"Material Costs",v:matTotal,c:"var(--text)"},
+          {l:"Labor Costs",v:laborTotal,c:"var(--text)",drill:"labor"},
+          {l:"Material Costs",v:matTotal,c:"var(--text)",drill:"material"},
           {l:"Hard Cost Total",v:hardCost,c:"var(--text)",bold:true},
           {l:`Builder's Premium (${project.markupPct||10}%)`,v:markup,c:"var(--gold)"},
           {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
           {l:"Total Project Cost",v:totalCost,c:"var(--text)",bold:true},
           {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
-        ]).map(({l,v,c,bold,field,blankZero})=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid var(--border)"}}>
-            <span style={{fontSize:12,color:"var(--muted)"}}>{l}</span>
+        ]).map(({l,v,c,bold,field,blankZero,drill})=>(
+          <div key={l} className={drill?"fin-tap":""} onClick={drill?()=>setCostDrill({kind:drill,title:l}):undefined} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid var(--border)"}}>
+            <span style={{fontSize:12,color:"var(--muted)"}}>{l}{drill&&<span className="fin-chev">›</span>}</span>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               {field==="lot"&&!editLot&&<button className="bto" style={{fontSize:10,padding:"2px 7px"}} onClick={()=>{setLotInput(project.lotCost||"");setEditLot(true);}}>Edit</button>}
               {field==="lot"&&editLot&&<div style={{display:"flex",gap:4}}><input className="inp" type="number" value={lotInput} onChange={e=>setLotInput(e.target.value)} style={{width:90,padding:"3px 7px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"3px 9px",fontSize:11}} onClick={()=>{onUpdate({...project,lotCost:lotInput});setEditLot(false);}}>Save</button></div>}
@@ -1047,15 +1213,37 @@ function Financials({project,onUpdate}){
           </div>
           {financingEntries.length===0&&<div style={{fontSize:11,color:"var(--muted)",fontStyle:"italic",marginBottom:8}}>No financing costs logged yet</div>}
           {financingEntries.map(f=>(
-            <div key={f.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid var(--border)"}}>
-              <div>
-                <div style={{fontSize:12,color:"var(--text)"}}>{f.description}</div>
-                <div style={{fontSize:10,color:"var(--muted)"}}>{f.type==="construction"?"Construction Loan":"Lot Loan"}{f.date?` · ${f.date}`:""}</div>
+            <div key={f.id} style={{padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:12,color:"var(--text)"}}>{f.description}</div>
+                  <div style={{fontSize:10,color:"var(--muted)"}}>{FIN_TYPE_LABELS[f.type]||"Financing"}{f.date?` · ${f.date}`:""}</div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:13,fontWeight:600,color:"var(--red)"}}>{fmt(f.amount)}</span>
+                  <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer"}} onClick={()=>deleteFin(f.id)}><Ic.Trash/></button>
+                </div>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:13,fontWeight:600,color:"var(--red)"}}>{fmt(f.amount)}</span>
-                <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer"}} onClick={()=>deleteFin(f.id)}><Ic.Trash/></button>
-              </div>
+              {(f.attachments||[]).length>0&&(
+                <div className="rcpt-row">
+                  {(f.attachments||[]).map(att=>(
+                    <ReceiptThumb key={att.id} att={att} onOpen={openReceipt} onDelete={a=>removeFinAttachment(f.id,a)}/>
+                  ))}
+                </div>
+              )}
+              <label className="bto rcpt-add" style={{fontSize:10,padding:"4px 8px"}}>
+                <Ic.Cam/>
+                {finBusy[f.id]?"Uploading…":"Add photo"}
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  capture="environment"
+                  multiple
+                  disabled={!!finBusy[f.id]}
+                  onChange={e=>{ addFinAttachments(f.id, e.target.files); e.target.value=""; }}
+                />
+              </label>
+              {finErr[f.id]&&<div style={{fontSize:11,color:"var(--red)",marginTop:4}}>{finErr[f.id]}</div>}
             </div>
           ))}
         </div>
@@ -1085,14 +1273,19 @@ function Financials({project,onUpdate}){
             <div key={i} style={{padding:"10px 13px",borderBottom:"1px solid var(--border)"}}>
               <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:7}}><span style={{fontSize:16}}>{ph.icon}</span><span style={{fontSize:12,fontWeight:600}}>{ph.name}</span><span style={{marginLeft:"auto",fontSize:13,fontWeight:600}}>{fmt(ph.labor+ph.material)}</span></div>
               <div className="row2">
-                {[{l:"Labor",v:ph.labor,c:"var(--text)"},{l:"Materials",v:ph.material,c:"var(--blue)"}].map(({l,v,c})=>(
-                  <div key={l} className="c2" style={{padding:"6px 8px"}}><div style={{fontSize:9,color:"var(--muted)",textTransform:"uppercase"}}>{l}</div><div style={{fontSize:12,fontWeight:600,marginTop:1,color:c}}>{v?fmt(v):"—"}</div></div>
+                {[{l:"Labor",v:ph.labor,c:"var(--text)",kind:"labor"},{l:"Materials",v:ph.material,c:"var(--blue)",kind:"material"}].map(({l,v,c,kind})=>(
+                  <div key={l} className={`c2${v?" fin-tap":""}`} style={{padding:"6px 8px"}} onClick={()=>v&&setCostDrill({kind,phaseId:ph.id,title:`${ph.name} — ${l}`})}>
+                    <div style={{fontSize:9,color:"var(--muted)",textTransform:"uppercase"}}>{l}{v?<span className="fin-chev">›</span>:""}</div>
+                    <div style={{fontSize:12,fontWeight:600,marginTop:1,color:c}}>{v?fmt(v):"—"}</div>
+                  </div>
                 ))}
               </div>
             </div>
           ))}
         </div>}
       </>}
+
+      {finTab==="receipts"&&<JobReceipts project={project}/>}
 
       {finTab==="change orders"&&<>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px 4px"}}>
@@ -1138,7 +1331,7 @@ function Financials({project,onUpdate}){
         <button className="btg" onClick={()=>setCoModal(false)}>Cancel</button>
       </Modal>}
 
-      {finModal&&<Modal title="Add Financing Cost" onClose={()=>setFinModal(false)}>
+      {finModal&&<Modal title="Add Financing Cost" onClose={()=>{setFinModal(false);setFinFiles([]);}}>
         <div className="fld"><label className="lbl">Description *</label><input className="inp" placeholder="e.g. Construction Loan Interest — May 2025" value={finForm.description} onChange={e=>setFinForm({...finForm,description:e.target.value})}/></div>
         <div className="fld"><label className="lbl">Amount ($) *</label><input className="inp" type="number" placeholder="e.g. 1850" value={finForm.amount} onChange={e=>setFinForm({...finForm,amount:e.target.value})}/></div>
         <div className="fld"><label className="lbl">Type</label>
@@ -1149,9 +1342,23 @@ function Financials({project,onUpdate}){
           </select>
         </div>
         <div className="fld"><label className="lbl">Date</label><input className="inp" type="date" value={finForm.date} onChange={e=>setFinForm({...finForm,date:e.target.value})}/></div>
+        <div className="fld">
+          <label className="lbl">Bill / photo (optional)</label>
+          <label className="bto rcpt-add" style={{fontSize:11,padding:"5px 10px",marginTop:0}}>
+            <Ic.Cam/>
+            {finFiles.length?`${finFiles.length} file${finFiles.length>1?"s":""} selected`:"Add photo / PDF"}
+            <input type="file" accept="image/*,application/pdf" capture="environment" multiple onChange={e=>setFinFiles(Array.from(e.target.files||[]))}/>
+          </label>
+        </div>
         <button className="btn" onClick={addFin}>Add Financing Cost</button>
-        <button className="btg" onClick={()=>setFinModal(false)}>Cancel</button>
+        <button className="btg" onClick={()=>{setFinModal(false);setFinFiles([]);}}>Cancel</button>
       </Modal>}
+
+      {costDrill&&<CostDrilldown
+        title={costDrill.title}
+        groups={collectCostGroups(project,{kind:costDrill.kind,phaseId:costDrill.phaseId})}
+        onClose={()=>setCostDrill(null)}
+      />}
     </div>
   );
 }

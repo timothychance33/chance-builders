@@ -126,17 +126,30 @@ const mimeFromName = (name) => {
  * Upload a receipt/invoice file. Persists the Storage object path (never a signed URL).
  * Path: {projectId}/{taskId}/{paymentId}/{safeFilename}
  */
-export const uploadPaymentAttachment = async ({ projectId, taskId, paymentId, file }) => {
-  const name = file?.name || 'receipt';
-  const mime = file?.type || mimeFromName(name);
-  const stored = uniqueStoredName(name, mime);
-  const path = `${projectId}/${taskId}/${paymentId}/${stored}`;
+const uploadReceiptFile = async (path, file, mime, name) => {
   const { error } = await supabase.storage.from(RECEIPTS_BUCKET).upload(path, file, {
     contentType: mime,
     upsert: false,
   });
   if (error) throw error;
   return { id: uid(), path, name, mime };
+};
+
+export const uploadPaymentAttachment = async ({ projectId, taskId, paymentId, file }) => {
+  const name = file?.name || 'receipt';
+  const mime = file?.type || mimeFromName(name);
+  const stored = uniqueStoredName(name, mime);
+  const path = `${projectId}/${taskId}/${paymentId}/${stored}`;
+  return uploadReceiptFile(path, file, mime, name);
+};
+
+/** Financing / SWEPCO-style bills. Path: {projectId}/financing/{financingId}/{safeFilename} */
+export const uploadFinancingAttachment = async ({ projectId, financingId, file }) => {
+  const name = file?.name || 'receipt';
+  const mime = file?.type || mimeFromName(name);
+  const stored = uniqueStoredName(name, mime);
+  const path = `${projectId}/financing/${financingId}/${stored}`;
+  return uploadReceiptFile(path, file, mime, name);
 };
 
 /** Time-limited URL for viewing; do not persist this on the payment object. */
