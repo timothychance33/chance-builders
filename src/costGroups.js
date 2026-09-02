@@ -4,6 +4,37 @@ export const num = (s) => {
   return isNaN(v) ? 0 : v;
 };
 
+/** Stored `financingCosts[].type` values. Utility is electric/water/gas — not loan interest. */
+export const FIN_TYPE_LABELS = {
+  construction: "Construction Loan",
+  lot: "Lot Loan",
+  other: "Other Financing",
+  utility: "Utility",
+};
+
+export const FIN_TYPE_OPTIONS = [
+  { value: "construction", label: "Construction Loan Interest" },
+  { value: "lot", label: "Lot Loan Interest" },
+  { value: "other", label: "Other Financing Cost" },
+  { value: "utility", label: "Utility (electric / water / gas)" },
+];
+
+export const isUtilityCost = (entry) => entry?.type === "utility";
+
+/** Split financingCosts into Utilities vs loan-style financing. Amounts are not changed. */
+export function partitionJobCosts(entries) {
+  const utilities = [];
+  const financing = [];
+  for (const f of entries || []) {
+    if (isUtilityCost(f)) utilities.push(f);
+    else financing.push(f);
+  }
+  return { utilities, financing };
+}
+
+export const sumAmounts = (entries) =>
+  (entries || []).reduce((s, f) => s + num(f.amount), 0);
+
 /**
  * Labor/material drill-down groups.
  *
@@ -48,7 +79,7 @@ export const sumCostGroups = (groups) =>
 
 /**
  * Every payment.attachments on the job, grouped by task.
- * Financing attachments are listed separately (they are not task payments).
+ * Utility and financing attachments are listed separately (they are not task payments).
  */
 export function collectJobReceipts(project) {
   const groups = [];
@@ -73,8 +104,9 @@ export function collectJobReceipts(project) {
       });
     }
   }
-  const financing = (project.financingCosts || []).filter(
+  const withPhotos = (project.financingCosts || []).filter(
     (f) => (f.attachments || []).length > 0
   );
-  return { groups, financing };
+  const { utilities, financing } = partitionJobCosts(withPhotos);
+  return { groups, financing, utilities };
 }

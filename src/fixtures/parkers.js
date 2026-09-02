@@ -95,7 +95,9 @@ export const parkersProject = {
     },
   ],
   financingCosts: [
-    { id: "mrr8arq", date: "6/28/2026", type: "other", amount: "1130.45", description: "SWEPCO", attachments: [] },
+    { id: "mrr8arq", date: "6/28/2026", type: "other", amount: "1130.45", description: "SWEPCO electric", attachments: [] },
+    { id: "swpb196", date: "7/15/2026", type: "other", amount: "196.85", description: "SWEPCO electric Unit B", attachments: [] },
+    { id: "swp8538", date: "8/1/2026", type: "other", amount: "85.38", description: "SWEPCO electric", attachments: [] },
   ],
   changeOrders: [],
 };

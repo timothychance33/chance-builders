@@ -1,13 +1,22 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { collectCostGroups, collectJobReceipts, sumCostGroups } from "./costGroups.js";
+import {
+  collectCostGroups,
+  collectJobReceipts,
+  isUtilityCost,
+  partitionJobCosts,
+  sumAmounts,
+  sumCostGroups,
+} from "./costGroups.js";
 
 // Shape taken from live Parkers Drug (78q3b8d). Amounts must match existing math.
 const parkers = {
   id: "78q3b8d",
   name: "Parkers Drug",
   financingCosts: [
-    { id: "mrr8arq", type: "other", amount: "1130.45", description: "SWEPCO" },
+    { id: "mrr8arq", type: "other", amount: "1130.45", description: "SWEPCO electric" },
+    { id: "swpb196", type: "other", amount: "196.85", description: "SWEPCO electric Unit B" },
+    { id: "swp8538", type: "other", amount: "85.38", description: "SWEPCO electric" },
   ],
   phases: [
     {
@@ -162,7 +171,7 @@ describe("collectCostGroups — no invented line/payment join", () => {
 
 describe("collectJobReceipts", () => {
   it("lists every payment.attachments grouped by task", () => {
-    const { groups, financing } = collectJobReceipts(parkers);
+    const { groups, financing, utilities } = collectJobReceipts(parkers);
     assert.deepEqual(groups.map((g) => g.taskId), ["cr_plumb", "cr_paint", "cr_fix"]);
     const fix = groups.find((g) => g.taskId === "cr_fix");
     assert.equal(fix.payments.length, 3);
@@ -170,6 +179,7 @@ describe("collectJobReceipts", () => {
     const plumb = groups.find((g) => g.taskId === "cr_plumb");
     assert.equal(plumb.payments[0].attachments.length, 2);
     assert.equal(financing.length, 0);
+    assert.equal(utilities.length, 0);
   });
 
   it("includes financing attachments when present, still separate from tasks", () => {
@@ -180,14 +190,75 @@ describe("collectJobReceipts", () => {
           id: "mrr8arq",
           type: "other",
           amount: "1130.45",
-          description: "SWEPCO",
+          description: "SWEPCO electric",
           attachments: [{ id: "sw1", name: "swepco.jpg", path: "78q3b8d/financing/mrr8arq/swepco.jpg" }],
         },
       ],
     };
-    const { groups, financing } = collectJobReceipts(withBill);
+    const { groups, financing, utilities } = collectJobReceipts(withBill);
     assert.equal(groups.some((g) => g.taskId === "mrr8arq"), false);
     assert.equal(financing.length, 1);
-    assert.equal(financing[0].description, "SWEPCO");
+    assert.equal(financing[0].description, "SWEPCO electric");
+    assert.equal(utilities.length, 0);
+  });
+
+  it("lists utility bill photos under Utilities, not Other financing", () => {
+    const withBill = {
+      ...parkers,
+      financingCosts: [
+        {
+          id: "mrr8arq",
+          type: "utility",
+          amount: "1130.45",
+          description: "SWEPCO electric",
+          attachments: [{ id: "sw1", name: "swepco.jpg", path: "78q3b8d/financing/mrr8arq/swepco.jpg" }],
+        },
+      ],
+    };
+    const { financing, utilities } = collectJobReceipts(withBill);
+    assert.equal(financing.length, 0);
+    assert.equal(utilities.length, 1);
+    assert.equal(utilities[0].id, "mrr8arq");
+    assert.equal(utilities[0].attachments[0].path, "78q3b8d/financing/mrr8arq/swepco.jpg");
+  });
+});
+
+describe("partitionJobCosts — utility is not loan interest", () => {
+  it("keeps live Parkers SWEPCO rows as other until Brick flips type", () => {
+    const { utilities, financing } = partitionJobCosts(parkers.financingCosts);
+    assert.deepEqual(financing.map((f) => f.id), ["mrr8arq", "swpb196", "swp8538"]);
+    assert.equal(utilities.length, 0);
+    assert.equal(sumAmounts(financing), 1130.45 + 196.85 + 85.38);
+    assert.equal(sumAmounts(utilities), 0);
+  });
+
+  it("moves only type=utility into Utilities; amounts stay the same", () => {
+    const flipped = parkers.financingCosts.map((f) =>
+      f.id === "mrr8arq" || f.id === "swpb196" || f.id === "swp8538"
+        ? { ...f, type: "utility" }
+        : f
+    );
+    const { utilities, financing } = partitionJobCosts(flipped);
+    assert.equal(financing.length, 0);
+    assert.deepEqual(utilities.map((f) => f.id), ["mrr8arq", "swpb196", "swp8538"]);
+    assert.equal(utilities.find((f) => f.id === "mrr8arq").amount, "1130.45");
+    assert.equal(utilities.find((f) => f.id === "swpb196").amount, "196.85");
+    assert.equal(utilities.find((f) => f.id === "swp8538").amount, "85.38");
+    assert.equal(sumAmounts(utilities) + sumAmounts(financing), 1130.45 + 196.85 + 85.38);
+  });
+
+  it("leaves construction/lot/other in financing", () => {
+    const mixed = [
+      { id: "a", type: "construction", amount: "100" },
+      { id: "b", type: "lot", amount: "50" },
+      { id: "c", type: "other", amount: "25" },
+      { id: "d", type: "utility", amount: "10" },
+    ];
+    const { utilities, financing } = partitionJobCosts(mixed);
+    assert.deepEqual(financing.map((f) => f.id), ["a", "b", "c"]);
+    assert.deepEqual(utilities.map((f) => f.id), ["d"]);
+    assert.equal(isUtilityCost(mixed[3]), true);
+    assert.equal(isUtilityCost(mixed[2]), false);
+    assert.equal(sumAmounts(mixed), 185);
   });
 });

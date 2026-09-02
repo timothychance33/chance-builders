@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor, signOut, uploadPaymentAttachment, uploadFinancingAttachment, signedUrlFor, removePaymentAttachment } from "./supabase";
-import { collectCostGroups, collectJobReceipts, sumCostGroups } from "./costGroups";
+import { collectCostGroups, collectJobReceipts, FIN_TYPE_LABELS, FIN_TYPE_OPTIONS, partitionJobCosts, sumAmounts, sumCostGroups } from "./costGroups";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const num = (s) => { const v = parseFloat(s); return isNaN(v) ? 0 : v; };
@@ -321,6 +321,7 @@ body{background:#0d1117;color:#e6e2d8;font-family:'DM Sans',sans-serif;-webkit-f
 .star{font-size:20px;cursor:pointer;color:var(--border);transition:color .1s}
 .star.on{color:var(--gold)}
 select.inp option{background:#1c2230}
+select.fin-type{-webkit-appearance:menulist;appearance:auto}
 ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;border:1px solid var(--border);cursor:pointer;font-family:'DM Sans',sans-serif}
 .tab-row{display:flex;border-bottom:1px solid var(--border);margin-bottom:14px}
@@ -417,8 +418,6 @@ function ReceiptThumb({att, onOpen, onDelete}){
   );
 }
 
-const FIN_TYPE_LABELS={construction:"Construction Loan",lot:"Lot Loan",other:"Other Financing"};
-
 function CostDrilldown({title, groups, onClose}){
   const total=sumCostGroups(groups);
   return (
@@ -450,12 +449,35 @@ function CostDrilldown({title, groups, onClose}){
   );
 }
 
+function ExtraCostReceipts({title, entries}){
+  if(!entries.length) return null;
+  return (
+    <>
+      <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",margin:"4px 0 10px"}}>{title}</div>
+      {entries.map(f=>(
+        <div key={f.id} style={{marginBottom:12,paddingBottom:10,borderBottom:"1px solid var(--border)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:6}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:600}}>{f.description}</div>
+              <div style={{fontSize:10,color:"var(--muted)"}}>{FIN_TYPE_LABELS[f.type]||"Cost"}{f.date?` · ${f.date}`:""}</div>
+            </div>
+            <span style={{fontSize:13,fontWeight:600,color:"var(--red)",flexShrink:0}}>{fmt(f.amount)}</span>
+          </div>
+          <div className="rcpt-row" style={{marginTop:0}}>
+            {(f.attachments||[]).map(att=><ReceiptThumb key={att.id} att={att} onOpen={openReceipt}/>)}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function JobReceipts({project}){
-  const {groups, financing}=collectJobReceipts(project);
-  const empty=!groups.length&&!financing.length;
+  const {groups, financing, utilities}=collectJobReceipts(project);
+  const empty=!groups.length&&!financing.length&&!utilities.length;
   return (
     <div className="card" style={{borderRadius:"0 0 12px 12px",marginTop:0}}>
-      {empty&&<div style={{fontSize:12,color:"var(--muted)",textAlign:"center",padding:"12px 0",lineHeight:1.5}}>No receipt photos on this job yet. Add them on Checklist → task → Payments, or on a financing cost.</div>}
+      {empty&&<div style={{fontSize:12,color:"var(--muted)",textAlign:"center",padding:"12px 0",lineHeight:1.5}}>No receipt photos on this job yet. Add them on Checklist → task → Payments, or on a utility / financing cost.</div>}
       {groups.map(g=>(
         <div key={g.taskId} style={{marginBottom:14,paddingBottom:12,borderBottom:"1px solid var(--border)"}}>
           <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{g.phaseName}</div>
@@ -473,23 +495,8 @@ function JobReceipts({project}){
           ))}
         </div>
       ))}
-      {financing.length>0&&<>
-        <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",margin:"4px 0 10px"}}>Other financing</div>
-        {financing.map(f=>(
-          <div key={f.id} style={{marginBottom:12,paddingBottom:10,borderBottom:"1px solid var(--border)"}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:6}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:600}}>{f.description}</div>
-                <div style={{fontSize:10,color:"var(--muted)"}}>{FIN_TYPE_LABELS[f.type]||"Financing"}{f.date?` · ${f.date}`:""}</div>
-              </div>
-              <span style={{fontSize:13,fontWeight:600,color:"var(--red)",flexShrink:0}}>{fmt(f.amount)}</span>
-            </div>
-            <div className="rcpt-row" style={{marginTop:0}}>
-              {(f.attachments||[]).map(att=><ReceiptThumb key={att.id} att={att} onOpen={openReceipt}/>)}
-            </div>
-          </div>
-        ))}
-      </>}
+      <ExtraCostReceipts title="Utilities" entries={utilities||[]}/>
+      <ExtraCostReceipts title="Other financing" entries={financing||[]}/>
     </div>
   );
 }
@@ -984,6 +991,62 @@ function Checklist({project,contractors,onUpdate}){
   );
 }
 
+function JobCostGroup({title, empty, entries, busy, err, onAdd, onType, onDelete, onAddFiles, onRemoveAtt}){
+  return (
+    <div style={{marginTop:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>{title}</div>
+        <button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={onAdd}>+ Add</button>
+      </div>
+      {entries.length===0&&<div style={{fontSize:11,color:"var(--muted)",fontStyle:"italic",marginBottom:8}}>{empty}</div>}
+      {entries.map(f=>(
+        <div key={f.id} style={{padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{minWidth:0,flex:1,marginRight:8}}>
+              <div style={{fontSize:12,color:"var(--text)"}}>{f.description}</div>
+              <div style={{fontSize:10,color:"var(--muted)",marginTop:2}}>{f.date||""}</div>
+              <label className="lbl" style={{marginTop:6,marginBottom:2}}>Type</label>
+              <select
+                className="inp fin-type"
+                aria-label={`Type for ${f.description||"cost"}`}
+                value={FIN_TYPE_OPTIONS.some(o=>o.value===f.type)?f.type:"other"}
+                onChange={e=>onType(f.id,e.target.value)}
+                style={{fontSize:11,padding:"5px 8px"}}
+              >
+                {FIN_TYPE_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--red)"}}>{fmt(f.amount)}</span>
+              <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer"}} onClick={()=>onDelete(f.id)}><Ic.Trash/></button>
+            </div>
+          </div>
+          {(f.attachments||[]).length>0&&(
+            <div className="rcpt-row">
+              {(f.attachments||[]).map(att=>(
+                <ReceiptThumb key={att.id} att={att} onOpen={openReceipt} onDelete={a=>onRemoveAtt(f.id,a)}/>
+              ))}
+            </div>
+          )}
+          <label className="bto rcpt-add" style={{fontSize:10,padding:"4px 8px"}}>
+            <Ic.Cam/>
+            {busy[f.id]?"Uploading…":"Add photo"}
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              capture="environment"
+              multiple
+              disabled={!!busy[f.id]}
+              onChange={e=>{ onAddFiles(f.id, e.target.files); e.target.value=""; }}
+            />
+          </label>
+          {err[f.id]&&<div style={{fontSize:11,color:"var(--red)",marginTop:4}}>{err[f.id]}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── FINANCIALS ─────────────────────────────────────────────────────────────
 function Financials({project,onUpdate}){
   const [coModal,setCoModal]=useState(false);
@@ -1007,6 +1070,11 @@ function Financials({project,onUpdate}){
   const [finBusy,setFinBusy]=useState({});
   const [finErr,setFinErr]=useState({});
   const [finFiles,setFinFiles]=useState([]);
+  const openFinModal=(type)=>{
+    setFinForm({description:"",amount:"",date:"",type});
+    setFinFiles([]);
+    setFinModal(true);
+  };
 
   const flip=isFlip(project.type);
   const costOnly=isCostTracking(project.type);
@@ -1023,19 +1091,22 @@ function Financials({project,onUpdate}){
   const purchasePrice=num(project.purchasePrice||0);
   const holdCosts=num(project.holdCosts||0);
   const arv=num(project.arv||0);
-  const financingEntries=project.financingCosts||[];
-  const financingTotal=financingEntries.reduce((s,f)=>s+num(f.amount),0);
-  const totalCost=lotCost+hardCost+markup+approvedCOs+financingTotal;
+  const allJobCosts=project.financingCosts||[];
+  const {utilities:utilityEntries, financing:financingEntries}=partitionJobCosts(allJobCosts);
+  const utilityTotal=sumAmounts(utilityEntries);
+  const financingTotal=sumAmounts(financingEntries);
+  const extraTotal=utilityTotal+financingTotal;
+  const totalCost=lotCost+hardCost+markup+approvedCOs+extraTotal;
   const sale=num(project.salePrice);
   const margin=sale-totalCost;
   const marginPct=sale?((margin/sale)*100).toFixed(1):0;
   const rehab=hardCost+approvedCOs;
-  const flipTotal=purchasePrice+holdCosts+rehab+financingTotal;
+  const flipTotal=purchasePrice+holdCosts+rehab+extraTotal;
   const flipProfit=arv-flipTotal;
   const flipPct=arv?((flipProfit/arv)*100).toFixed(1):0;
   const paidToDate=tasks.flatMap(t=>t.payments||[]).reduce((s,p)=>s+num(p.amount),0);
   const missingWaivers=tasks.flatMap(t=>t.payments||[]).filter(p=>num(p.amount)>0&&!p.lienWaiver).length;
-  const costToDate=hardCost+approvedCOs+financingTotal;
+  const costToDate=hardCost+approvedCOs+extraTotal;
   const vsBudget=budget?costToDate-budget:0;
 
   const addCO=()=>{
@@ -1063,12 +1134,16 @@ function Financials({project,onUpdate}){
       console.error(err);
       alert(err.message||"Upload failed");
     }
-    onUpdate({...project,financingCosts:[...financingEntries,{id,...finForm,attachments,createdAt:new Date().toISOString()}]});
+    onUpdate({...project,financingCosts:[...allJobCosts,{id,...finForm,attachments,createdAt:new Date().toISOString()}]});
     setFinModal(false);setFinForm({description:"",amount:"",date:"",type:"construction"});setFinFiles([]);
   };
+  const updateFinType=(id,type)=>onUpdate({
+    ...project,
+    financingCosts:allJobCosts.map(f=>f.id===id?{...f,type}:f),
+  });
   const deleteFin=async (id)=>{
-    const entry=financingEntries.find(f=>f.id===id);
-    onUpdate({...project,financingCosts:financingEntries.filter(f=>f.id!==id)});
+    const entry=allJobCosts.find(f=>f.id===id);
+    onUpdate({...project,financingCosts:allJobCosts.filter(f=>f.id!==id)});
     for(const att of entry?.attachments||[]){
       try{ await removePaymentAttachment(att.path); }catch(e){ console.error(e); }
     }
@@ -1091,7 +1166,7 @@ function Financials({project,onUpdate}){
       if(added.length){
         onUpdate({
           ...project,
-          financingCosts:financingEntries.map(f=>f.id===finId?{...f,attachments:[...(f.attachments||[]),...added]}:f),
+          financingCosts:allJobCosts.map(f=>f.id===finId?{...f,attachments:[...(f.attachments||[]),...added]}:f),
         });
       }
     }catch(err){
@@ -1112,7 +1187,7 @@ function Financials({project,onUpdate}){
     }
     onUpdate({
       ...project,
-      financingCosts:financingEntries.map(f=>f.id===finId?{...f,attachments:(f.attachments||[]).filter(a=>a.id!==att.id)}:f),
+      financingCosts:allJobCosts.map(f=>f.id===finId?{...f,attachments:(f.attachments||[]).filter(a=>a.id!==att.id)}:f),
     });
   };
 
@@ -1161,6 +1236,7 @@ function Financials({project,onUpdate}){
           {l:"Hard Cost Total",v:hardCost,c:"var(--text)",bold:true},
           {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
+          {l:`Utilities (${utilityEntries.length})`,v:utilityTotal,c:utilityTotal>0?"var(--red)":"var(--muted)"},
           {l:"Cost to Date",v:costToDate,c:"var(--text)",bold:true},
           {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
           {l:"Budget (from estimates)",v:budget,c:"var(--gold)",blankZero:true},
@@ -1172,6 +1248,7 @@ function Financials({project,onUpdate}){
           {l:"Rehab Total",v:hardCost,c:"var(--text)",bold:true},
           {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
+          {l:`Utilities (${utilityEntries.length})`,v:utilityTotal,c:utilityTotal>0?"var(--red)":"var(--muted)"},
           {l:"Total Invested",v:flipTotal,c:"var(--text)",bold:true},
           {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
         ]:[
@@ -1182,6 +1259,7 @@ function Financials({project,onUpdate}){
           {l:`Builder's Premium (${project.markupPct||10}%)`,v:markup,c:"var(--gold)"},
           {l:`Approved Change Orders (${cos.filter(co=>co.status==="approved"||co.status==="complete").length})`,v:approvedCOs,c:approvedCOs>0?"var(--red)":"var(--muted)"},
           {l:`Financing Costs (${financingEntries.length})`,v:financingTotal,c:financingTotal>0?"var(--red)":"var(--muted)"},
+          {l:`Utilities (${utilityEntries.length})`,v:utilityTotal,c:utilityTotal>0?"var(--red)":"var(--muted)"},
           {l:"Total Project Cost",v:totalCost,c:"var(--text)",bold:true},
           {l:"Paid to Subs",v:paidToDate,c:"var(--blue)"},
         ]).map(({l,v,c,bold,field,blankZero,drill})=>(
@@ -1205,48 +1283,30 @@ function Financials({project,onUpdate}){
             :<div style={{display:"flex",gap:5}}><input className="inp" type="number" value={markupInput} onChange={e=>setMarkupInput(e.target.value)} style={{width:70,padding:"4px 8px",fontSize:12}}/><button className="btn" style={{width:"auto",padding:"4px 10px",fontSize:11}} onClick={()=>{onUpdate({...project,markupPct:markupInput});setEditMarkup(false);}}>Save</button></div>}
         </div>}
 
-        {/* Financing costs section */}
-        <div style={{marginTop:10}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>Financing Costs</div>
-            <button className="bto" style={{fontSize:11,padding:"3px 9px"}} onClick={()=>setFinModal(true)}>+ Add</button>
-          </div>
-          {financingEntries.length===0&&<div style={{fontSize:11,color:"var(--muted)",fontStyle:"italic",marginBottom:8}}>No financing costs logged yet</div>}
-          {financingEntries.map(f=>(
-            <div key={f.id} style={{padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:12,color:"var(--text)"}}>{f.description}</div>
-                  <div style={{fontSize:10,color:"var(--muted)"}}>{FIN_TYPE_LABELS[f.type]||"Financing"}{f.date?` · ${f.date}`:""}</div>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:13,fontWeight:600,color:"var(--red)"}}>{fmt(f.amount)}</span>
-                  <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer"}} onClick={()=>deleteFin(f.id)}><Ic.Trash/></button>
-                </div>
-              </div>
-              {(f.attachments||[]).length>0&&(
-                <div className="rcpt-row">
-                  {(f.attachments||[]).map(att=>(
-                    <ReceiptThumb key={att.id} att={att} onOpen={openReceipt} onDelete={a=>removeFinAttachment(f.id,a)}/>
-                  ))}
-                </div>
-              )}
-              <label className="bto rcpt-add" style={{fontSize:10,padding:"4px 8px"}}>
-                <Ic.Cam/>
-                {finBusy[f.id]?"Uploading…":"Add photo"}
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  capture="environment"
-                  multiple
-                  disabled={!!finBusy[f.id]}
-                  onChange={e=>{ addFinAttachments(f.id, e.target.files); e.target.value=""; }}
-                />
-              </label>
-              {finErr[f.id]&&<div style={{fontSize:11,color:"var(--red)",marginTop:4}}>{finErr[f.id]}</div>}
-            </div>
-          ))}
-        </div>
+        <JobCostGroup
+          title="Utilities"
+          empty="No utility bills logged yet. To move a SWEPCO / electric row here, change its Type to Utility."
+          entries={utilityEntries}
+          busy={finBusy}
+          err={finErr}
+          onAdd={()=>openFinModal("utility")}
+          onType={updateFinType}
+          onDelete={deleteFin}
+          onAddFiles={addFinAttachments}
+          onRemoveAtt={removeFinAttachment}
+        />
+        <JobCostGroup
+          title="Financing Costs"
+          empty="No financing costs logged yet"
+          entries={financingEntries}
+          busy={finBusy}
+          err={finErr}
+          onAdd={()=>openFinModal("construction")}
+          onType={updateFinType}
+          onDelete={deleteFin}
+          onAddFiles={addFinAttachments}
+          onRemoveAtt={removeFinAttachment}
+        />
 
         {costOnly
           ?(budget>0&&<div style={{marginTop:11,padding:12,background:vsBudget<=0?"rgba(77,187,120,.08)":"rgba(224,82,82,.08)",border:`1px solid ${vsBudget<=0?"rgba(77,187,120,.2)":"rgba(224,82,82,.2)"}`,borderRadius:8,textAlign:"center"}}>
@@ -1331,14 +1391,12 @@ function Financials({project,onUpdate}){
         <button className="btg" onClick={()=>setCoModal(false)}>Cancel</button>
       </Modal>}
 
-      {finModal&&<Modal title="Add Financing Cost" onClose={()=>{setFinModal(false);setFinFiles([]);}}>
-        <div className="fld"><label className="lbl">Description *</label><input className="inp" placeholder="e.g. Construction Loan Interest — May 2025" value={finForm.description} onChange={e=>setFinForm({...finForm,description:e.target.value})}/></div>
+      {finModal&&<Modal title={finForm.type==="utility"?"Add Utility":"Add Financing Cost"} onClose={()=>{setFinModal(false);setFinFiles([]);}}>
+        <div className="fld"><label className="lbl">Description *</label><input className="inp" placeholder={finForm.type==="utility"?"e.g. SWEPCO — June 2026":"e.g. Construction Loan Interest — May 2025"} value={finForm.description} onChange={e=>setFinForm({...finForm,description:e.target.value})}/></div>
         <div className="fld"><label className="lbl">Amount ($) *</label><input className="inp" type="number" placeholder="e.g. 1850" value={finForm.amount} onChange={e=>setFinForm({...finForm,amount:e.target.value})}/></div>
         <div className="fld"><label className="lbl">Type</label>
           <select className="inp" value={finForm.type} onChange={e=>setFinForm({...finForm,type:e.target.value})}>
-            <option value="construction">Construction Loan Interest</option>
-            <option value="lot">Lot Loan Interest</option>
-            <option value="other">Other Financing Cost</option>
+            {FIN_TYPE_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
         <div className="fld"><label className="lbl">Date</label><input className="inp" type="date" value={finForm.date} onChange={e=>setFinForm({...finForm,date:e.target.value})}/></div>
@@ -1350,7 +1408,7 @@ function Financials({project,onUpdate}){
             <input type="file" accept="image/*,application/pdf" capture="environment" multiple onChange={e=>setFinFiles(Array.from(e.target.files||[]))}/>
           </label>
         </div>
-        <button className="btn" onClick={addFin}>Add Financing Cost</button>
+        <button className="btn" onClick={addFin}>{finForm.type==="utility"?"Add Utility":"Add Financing Cost"}</button>
         <button className="btg" onClick={()=>{setFinModal(false);setFinFiles([]);}}>Cancel</button>
       </Modal>}
 
