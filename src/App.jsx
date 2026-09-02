@@ -391,18 +391,21 @@ async function openReceipt(att){
 
 function ReceiptThumb({att, onOpen, onDelete}){
   const [url,setUrl]=useState(null);
+  const [failed,setFailed]=useState(false);
   useEffect(()=>{
     if(!isPreviewableImage(att.mime)) return;
     let cancelled=false;
-    signedUrlFor(att.path).then(u=>{ if(!cancelled) setUrl(u); }).catch(()=>{});
+    setUrl(null); setFailed(false);
+    signedUrlFor(att.path).then(u=>{ if(!cancelled) setUrl(u); }).catch(()=>{ if(!cancelled) setFailed(true); });
     return ()=>{ cancelled=true; };
   },[att.path, att.mime]);
   const label=(att.name||"file").length>22?(att.name||"file").slice(0,20)+"…":(att.name||"file");
+  const showImage=isPreviewableImage(att.mime)&&!failed;
   return (
     <div className="rcpt-wrap">
-      {isPreviewableImage(att.mime)
+      {showImage
         ? (url
-            ? <img className="rcpt-th" src={url} alt={att.name||"Receipt"} onClick={()=>onOpen(att)}/>
+            ? <img className="rcpt-th" src={url} alt={att.name||"Receipt"} onClick={()=>onOpen(att)} onError={()=>setFailed(true)}/>
             : <div className="rcpt-ph"/>)
         : <button type="button" className="rcpt-chip" onClick={()=>onOpen(att)} title={att.name}>
             <span style={{color:"var(--gold)",fontWeight:700,flexShrink:0}}>{isPdf(att)?"PDF":"FILE"}</span>
