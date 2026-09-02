@@ -36,6 +36,23 @@ export const sumAmounts = (entries) =>
   (entries || []).reduce((s, f) => s + num(f.amount), 0);
 
 /**
+ * Compact Utilities drill-down rows.
+ * Only financingCosts with type=utility. Amounts stay as stored.
+ * Photos are that row’s attachments (same signed-URL path as financing).
+ */
+export function collectUtilityBills(project) {
+  const { utilities } = partitionJobCosts(project?.financingCosts);
+  return utilities.map((f) => ({
+    id: f.id,
+    description: String(f.description || "").trim() || "Untitled",
+    date: f.date || "",
+    amount: f.amount,
+    attachments: f.attachments || [],
+    type: f.type,
+  }));
+}
+
+/**
  * Labor/material drill-down groups.
  *
  * Line items and payments are NOT linked. Do not invent a join.

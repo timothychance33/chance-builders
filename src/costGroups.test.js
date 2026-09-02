@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   collectCostGroups,
   collectJobReceipts,
+  collectUtilityBills,
   isUtilityCost,
   partitionJobCosts,
   sumAmounts,
@@ -14,9 +15,10 @@ const parkers = {
   id: "78q3b8d",
   name: "Parkers Drug",
   financingCosts: [
-    { id: "mrr8arq", type: "other", amount: "1130.45", description: "SWEPCO electric" },
-    { id: "swpb196", type: "other", amount: "196.85", description: "SWEPCO electric Unit B" },
-    { id: "swp8538", type: "other", amount: "85.38", description: "SWEPCO electric" },
+    { id: "mrr8arq", type: "utility", amount: "1130.45", description: "SWEPCO electric", date: "6/28/2026" },
+    { id: "swpb196", type: "utility", amount: "196.85", description: "SWEPCO electric Unit B", date: "8/21/2026" },
+    { id: "swp8538", type: "utility", amount: "85.38", description: "SWEPCO electric", date: "8/21/2026" },
+    { id: "tppllc1", type: "other", amount: "18100", description: "TPP LLC", date: "6/6/2026" },
   ],
   phases: [
     {
@@ -224,27 +226,15 @@ describe("collectJobReceipts", () => {
 });
 
 describe("partitionJobCosts — utility is not loan interest", () => {
-  it("keeps live Parkers SWEPCO rows as other until Brick flips type", () => {
+  it("lists flipped Parkers SWEPCO rows as utilities; TPP stays financing", () => {
     const { utilities, financing } = partitionJobCosts(parkers.financingCosts);
-    assert.deepEqual(financing.map((f) => f.id), ["mrr8arq", "swpb196", "swp8538"]);
-    assert.equal(utilities.length, 0);
-    assert.equal(sumAmounts(financing), 1130.45 + 196.85 + 85.38);
-    assert.equal(sumAmounts(utilities), 0);
-  });
-
-  it("moves only type=utility into Utilities; amounts stay the same", () => {
-    const flipped = parkers.financingCosts.map((f) =>
-      f.id === "mrr8arq" || f.id === "swpb196" || f.id === "swp8538"
-        ? { ...f, type: "utility" }
-        : f
-    );
-    const { utilities, financing } = partitionJobCosts(flipped);
-    assert.equal(financing.length, 0);
     assert.deepEqual(utilities.map((f) => f.id), ["mrr8arq", "swpb196", "swp8538"]);
+    assert.deepEqual(financing.map((f) => f.id), ["tppllc1"]);
     assert.equal(utilities.find((f) => f.id === "mrr8arq").amount, "1130.45");
     assert.equal(utilities.find((f) => f.id === "swpb196").amount, "196.85");
     assert.equal(utilities.find((f) => f.id === "swp8538").amount, "85.38");
-    assert.equal(sumAmounts(utilities) + sumAmounts(financing), 1130.45 + 196.85 + 85.38);
+    assert.equal(sumAmounts(utilities), 1130.45 + 196.85 + 85.38);
+    assert.equal(sumAmounts(financing), 18100);
   });
 
   it("leaves construction/lot/other in financing", () => {
@@ -260,5 +250,35 @@ describe("partitionJobCosts — utility is not loan interest", () => {
     assert.equal(isUtilityCost(mixed[3]), true);
     assert.equal(isUtilityCost(mixed[2]), false);
     assert.equal(sumAmounts(mixed), 185);
+  });
+});
+
+describe("collectUtilityBills — compact Summary drill-down", () => {
+  it("returns the three SWEPCO bills with name, date, amount, and photo slots", () => {
+    const withPhoto = {
+      ...parkers,
+      financingCosts: parkers.financingCosts.map((f) =>
+        f.id === "mrr8arq"
+          ? { ...f, attachments: [{ id: "sw1", name: "swepco.jpg", path: "78q3b8d/financing/mrr8arq/swepco.jpg" }] }
+          : f
+      ),
+    };
+    const bills = collectUtilityBills(withPhoto);
+    assert.deepEqual(bills.map((b) => b.id), ["mrr8arq", "swpb196", "swp8538"]);
+    assert.equal(bills.some((b) => b.id === "tppllc1"), false);
+    assert.equal(bills[0].description, "SWEPCO electric");
+    assert.equal(bills[0].date, "6/28/2026");
+    assert.equal(bills[0].amount, "1130.45");
+    assert.equal(bills[0].attachments[0].path, "78q3b8d/financing/mrr8arq/swepco.jpg");
+    assert.deepEqual(bills[1].attachments, []);
+    assert.equal(sumAmounts(bills), 1130.45 + 196.85 + 85.38);
+  });
+
+  it("does not invent or rewrite stored amounts", () => {
+    const bills = collectUtilityBills(parkers);
+    assert.deepEqual(
+      bills.map((b) => b.amount),
+      ["1130.45", "196.85", "85.38"]
+    );
   });
 });
