@@ -196,12 +196,14 @@ const COMMERCIAL_PHASES = [
 const COMMERCIAL_REHAB_PHASES = [
   { id:"cr1", name:"Demo / Abatement", short:"Demo", icon:"🔨", tasks:[
     {id:"cr_survey",name:"Existing Conditions / As-Built Survey"},
+    {id:"cr_design",name:"Plans / Architecture / Design"},
     {id:"cr_hazmat",name:"Hazmat / Asbestos / Lead Survey"},
     {id:"cr_permits",name:"Rehab Permits Received"},
     {id:"cr_abatement",name:"Abatement Complete"},
     {id:"cr_demo",name:"Selective Demolition"},
     {id:"cr_dump",name:"Dumpsters / Debris Removal"},
     {id:"cr_protect",name:"Adjacent Occupancy / Temp Protection"},
+    {id:"cr_paving",name:"Parking / Paving"},
   ]},
   { id:"cr2", name:"Structural / Envelope", short:"Envelope", icon:"🏢", tasks:[
     {id:"cr_struct",name:"Structural Repairs / Reinforcement"},
