@@ -196,6 +196,7 @@ const COMMERCIAL_PHASES = [
 const COMMERCIAL_REHAB_PHASES = [
   { id:"cr1", name:"Demo / Abatement", short:"Demo", icon:"🔨", tasks:[
     {id:"cr_survey",name:"Existing Conditions / As-Built Survey"},
+    {id:"cr_design",name:"Plans / Architecture / Design"},
     {id:"cr_hazmat",name:"Hazmat / Asbestos / Lead Survey"},
     {id:"cr_permits",name:"Rehab Permits Received"},
     {id:"cr_abatement",name:"Abatement Complete"},
