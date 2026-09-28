@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor, signOut, uploadPaymentAttachment, uploadFinancingAttachment, signedUrlFor, removePaymentAttachment } from "./supabase";
+import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor, signOut, uploadPaymentAttachment, uploadFinancingAttachment, uploadSelectionPhoto, signedUrlFor, removePaymentAttachment } from "./supabase";
 import { collectCostGroups, collectJobReceipts, collectUtilityBills, FIN_TYPE_LABELS, FIN_TYPE_OPTIONS, partitionJobCosts, sumAmounts, sumCostGroups } from "./costGroups";
+import { isFlip, isResidential, phaseTemplateKind, projectWithType, isClientSelection, productSelections, replaceProductSelections, groupSelectionsByRoom, selectionPhoto, safeLink } from "./jobModel";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const num = (s) => { const v = parseFloat(s); return isNaN(v) ? 0 : v; };
@@ -8,16 +9,17 @@ const fmt = (n) => "$" + num(n).toLocaleString("en-US", { minimumFractionDigits:
 const today = () => new Date().toLocaleDateString();
 const now = () => new Date().toLocaleString();
 
-// Stable data.type keys: custom | spec | flip | commercial | commercial_rehab
+// Stable data.type keys: custom | spec | flip | rental_rehab | commercial | commercial_rehab
+// rental_rehab is residential (same six-draw template as custom/spec/flip). Flip profit stays flip-only.
 const JOB_TYPES = [
   {value:"custom", label:"Custom (Client Build)", short:"Custom", tag:"tgo"},
   {value:"spec", label:"Spec House", short:"Spec", tag:"tb"},
   {value:"flip", label:"Residential Flip", short:"Flip", tag:"tp"},
+  {value:"rental_rehab", label:"Residential Rehab / Rental", short:"Rental", tag:"trh"},
   {value:"commercial", label:"Commercial Construction", short:"Commercial", tag:"tc"},
   {value:"commercial_rehab", label:"Commercial Rehab / TI", short:"Comm Rehab", tag:"tcr"},
 ];
 const jobType = (type) => JOB_TYPES.find(t=>t.value===type) || JOB_TYPES[0];
-const isFlip = (type) => type === "flip";
 const isCostTracking = (type) => type === "commercial_rehab";
 const hasClientFlow = (type) => type === "custom" || type === "spec";
 const projectBudget = (proj) => (proj.phases||[]).reduce((s,ph)=>s+(ph.tasks||[]).reduce((ss,t)=>ss+num(t.estimate),0),0);
@@ -246,8 +248,9 @@ const seedTasks = (tasks) => tasks.map(t=>({
 }));
 
 const phasesForType = (type) => {
-  if(type === "commercial_rehab") return COMMERCIAL_REHAB_PHASES;
-  if(type === "commercial") return COMMERCIAL_PHASES;
+  const kind = phaseTemplateKind(type);
+  if(kind === "commercial_rehab") return COMMERCIAL_REHAB_PHASES;
+  if(kind === "commercial") return COMMERCIAL_PHASES;
   return DRAW_PHASES;
 };
 
@@ -293,6 +296,7 @@ body{background:#0d1117;color:#e6e2d8;font-family:'DM Sans',sans-serif;-webkit-f
 .tp{background:rgba(155,127,232,.12);color:var(--purple)}
 .tc{background:rgba(232,160,90,.12);color:#e8a05a}
 .tcr{background:rgba(78,196,176,.12);color:#4ec4b0}
+.trh{background:rgba(214,112,140,.14);color:#e7a0b4}
 .tm{background:rgba(107,117,146,.12);color:var(--muted)}
 .div{border:none;border-top:1px solid var(--border);margin:10px 0}
 .cr{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
@@ -571,17 +575,34 @@ export default function App({ session }) {
   const [loaded,setLoaded]=useState(false);
   const [error,setError]=useState(null);
   const [saving,setSaving]=useState(false);
-  const fixtureMode=import.meta.env.DEV && new URLSearchParams(typeof window!=="undefined"?window.location.search:"").get("fixture")==="parkers";
+  const fixtureName=import.meta.env.DEV && typeof window!=="undefined"
+    ? (new URLSearchParams(window.location.search).get("fixture")||"")
+    : "";
+  const fixtureMode=!!fixtureName;
 
   // ── Load from Supabase on mount ──
   useEffect(()=>{
-    if(fixtureMode){
+    if(fixtureName==="parkers"){
       import("./fixtures/parkers.js").then(({parkersProject})=>{
         setProjects([parkersProject]);
         setActiveId(parkersProject.id);
         setTab("fin");
         setLoaded(true);
       });
+      return;
+    }
+    if(fixtureName==="palmetto"){
+      import("./fixtures/palmetto.js").then(({palmettoProject})=>{
+        setProjects([palmettoProject]);
+        setActiveId(null);
+        setTab("dash");
+        setLoaded(true);
+      });
+      return;
+    }
+    if(fixtureMode){
+      setError("Unknown local fixture.");
+      setLoaded(true);
       return;
     }
     Promise.all([loadProjects(), loadContractors()])
@@ -613,7 +634,7 @@ export default function App({ session }) {
 
   const active=projects.find(p=>p.id===activeId);
   const openProject=(id)=>{setActiveId(id);setTab("check");};
-  const needsProject=["check","fin","log","finishes_more","portal_more"].includes(tab)&&!active;
+  const needsProject=["check","fin","log","finishes_more","selections_more","portal_more"].includes(tab)&&!active;
   const tabLabel={dash:"Project Dashboard",check:active?.name||"Checklist",fin:active?.name||"Financials",directory:"Directory",log:"Job Log",more:"More"};
 
   if(!loaded) return (
@@ -649,12 +670,13 @@ export default function App({ session }) {
           ?<div style={{padding:40,textAlign:"center"}}><div style={{fontSize:48,marginBottom:14}}>🏗️</div><div style={{color:"var(--muted)",marginBottom:18}}>Select a project first</div><button className="btn" style={{width:"auto",padding:"10px 28px"}} onClick={()=>setTab("dash")}>Go to Dashboard</button></div>
           :<div>
             {tab==="dash"&&<Dashboard projects={projects} contractors={contractors} onOpen={openProject} onUpdate={setProj} onDelete={removeProject}/>}
-            {tab==="check"&&active&&<Checklist project={active} contractors={contractors} onUpdate={updateActive}/>}
+            {tab==="check"&&active&&<Checklist project={active} contractors={contractors} onUpdate={updateActive} onOpenSelections={isResidential(active.type)?()=>setTab("selections_more"):null}/>}
             {tab==="fin"&&active&&<Financials project={active} onUpdate={updateActive}/>}
             {tab==="directory"&&<Directory contractors={contractors} onUpdate={setCont}/>}
             {tab==="log"&&active&&<JobLog project={active} onUpdate={updateActive}/>}
             {tab==="more"&&<More active={active} projects={projects} onUpdate={setProj} updateActive={updateActive} setTab={setTab} onSignOut={signOut}/>}
             {tab==="finishes_more"&&active&&<div><div style={{padding:"10px 13px"}}><button className="btg" style={{width:"auto",padding:"7px 14px",marginTop:0}} onClick={()=>setTab("more")}>← Back</button></div><Finishes project={active} onUpdate={updateActive}/></div>}
+            {tab==="selections_more"&&active&&<div><div style={{padding:"10px 13px"}}><button className="btg" style={{width:"auto",padding:"7px 14px",marginTop:0}} onClick={()=>setTab("more")}>← Back</button></div>{isResidential(active.type)?<Selections project={active} onUpdate={updateActive} offline={fixtureMode}/>:<div className="card" style={{color:"var(--muted)",fontSize:13,lineHeight:1.5}}>Finishes & Products is for residential jobs.</div>}</div>}
             {tab==="portal_more"&&active&&<div><div style={{padding:"10px 13px"}}><button className="btg" style={{width:"auto",padding:"7px 14px",marginTop:0}} onClick={()=>setTab("more")}>← Back</button></div>{hasClientFlow(active.type)?<Portal project={active} onUpdate={updateActive}/>:<div className="card" style={{color:"var(--muted)",fontSize:13,lineHeight:1.5}}>No homeowner portal for {jobType(active.type).label.toLowerCase()} jobs. Use Finishes, Financials, and the Job Log instead.</div>}</div>}
           </div>
         }
@@ -786,7 +808,7 @@ function Dashboard({projects,contractors,onOpen,onUpdate,onDelete}){
 }
 
 // ── CHECKLIST ──────────────────────────────────────────────────────────────
-function Checklist({project,contractors,onUpdate}){
+function Checklist({project,contractors,onUpdate,onOpenSelections}){
   const [open,setOpen]=useState(0);
   const [taskModal,setTaskModal]=useState(null);
   const [draft,setDraft]=useState(null);
@@ -871,6 +893,7 @@ function Checklist({project,contractors,onUpdate}){
   return (
     <div>
       <div className="sec">{project.phases.length}-Phase Checklist</div>
+      {onOpenSelections&&<div style={{padding:"0 13px 8px"}}><button className="btn" style={{padding:"13px 16px",fontSize:15}} onClick={onOpenSelections}>Finishes & Products</button></div>}
       {project.phases.map((ph,phI)=>{
         const unlocked=isUnlocked(phI);
         const activeTasks=ph.tasks.filter(t=>!t.na);
@@ -1137,7 +1160,7 @@ function Financials({project,onUpdate}){
     setFinModal(true);
   };
 
-  const flip=isFlip(project.type);
+  const flip=isFlip(project.type); // rental_rehab stays on the residential sale view, not flip profit
   const costOnly=isCostTracking(project.type);
   const budget=projectBudget(project);
   const tasks=project.phases.flatMap(ph=>ph.tasks);
@@ -1967,16 +1990,17 @@ function Portal({project,onUpdate}){
   const done=active.filter(t=>t.completed).length;
   const pct=active.length?Math.round(done/active.length*100):0;
   const cur=project.phases.find(ph=>ph.tasks.some(t=>!t.completed&&!t.na));
-  const sels=project.selections||[];
+  const allSels=Array.isArray(project.selections)?project.selections:[];
+  const sels=allSels.filter(isClientSelection);
   const pendingCOs=(project.changeOrders||[]).filter(co=>co.status==="presented");
 
   const addSel=()=>{
     if(!selForm.title) return;
-    onUpdate({...project,selections:[...sels,{id:uid(),...selForm,chosen:null,chosenAt:null,createdAt:new Date().toISOString()}]});
+    onUpdate({...project,selections:[...allSels,{id:uid(),...selForm,chosen:null,chosenAt:null,createdAt:new Date().toISOString()}]});
     setSelModal(false);setSelForm({title:"",description:"",optionA:"",optionB:"",imageA:"",imageB:""});
   };
-  const choose=(selId,option)=>onUpdate({...project,selections:sels.map(s=>s.id===selId?{...s,chosen:option,chosenAt:now()}:s)});
-  const delSel=(id)=>onUpdate({...project,selections:sels.filter(s=>s.id!==id)});
+  const choose=(selId,option)=>onUpdate({...project,selections:allSels.map(s=>s.id===selId?{...s,chosen:option,chosenAt:now()}:s)});
+  const delSel=(id)=>onUpdate({...project,selections:allSels.filter(s=>s.id!==id)});
 
   return (
     <div>
@@ -2279,6 +2303,178 @@ function FinishDetail({finish,CATS,onSave,onClose}){
   );
 }
 
+// ── FINISHES & PRODUCTS (data.selections) ─────────────────────────────────
+const EMPTY_PRODUCT={item:"",room:"",brand:"",model:"",color:"",vendor:"",link:"",notes:"",photo:null};
+
+function Selections({project,onUpdate,offline}){
+  const products=productSelections(project);
+  const groups=groupSelectionsByRoom(products);
+  const [modal,setModal]=useState(false);
+  const [editing,setEditing]=useState(null);
+  const [draftId,setDraftId]=useState(null);
+  const [originalPhoto,setOriginalPhoto]=useState(null);
+  const [form,setForm]=useState(EMPTY_PRODUCT);
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState("");
+
+  const reset=()=>{ setModal(false); setEditing(null); setDraftId(null); setOriginalPhoto(null); setErr(""); setBusy(false); setForm(EMPTY_PRODUCT); };
+
+  const closeModal=()=>{
+    const photo=form.photo;
+    if(photo?.path && photo.path!==originalPhoto?.path && !offline){
+      removePaymentAttachment(photo.path).catch(e=>console.error(e));
+    }
+    reset();
+  };
+
+  const openAdd=()=>{
+    setEditing(null); setDraftId(uid()); setOriginalPhoto(null); setForm({...EMPTY_PRODUCT}); setErr(""); setModal(true);
+  };
+
+  const openEdit=(row)=>{
+    setEditing(row.id); setDraftId(row.id); setOriginalPhoto(row.photo||null);
+    setForm({
+      item:row.item||"",
+      room:row.room||"",
+      brand:row.brand||"",
+      model:row.model||"",
+      color:row.color||"",
+      vendor:row.vendor||"",
+      link:row.link||"",
+      notes:row.notes||"",
+      photo:selectionPhoto(row.photo),
+    });
+    setErr(""); setModal(true);
+  };
+
+  const onPhoto=async(file)=>{
+    if(!file) return;
+    if(file.size>10*1024*1024){ setErr("Photo is over 10MB"); return; }
+    setErr(""); setBusy(true);
+    try{
+      const previous=form.photo;
+      let photo;
+      if(offline){
+        photo={id:uid(),path:`${project.id}/selections/${draftId}/${file.name||"photo"}`,name:file.name||"photo",mime:file.type||"image/jpeg"};
+      }else{
+        photo=await uploadSelectionPhoto({projectId:project.id,selectionId:draftId,file});
+      }
+      photo=selectionPhoto(photo);
+      if(previous?.path && previous.path!==photo.path && previous.path!==originalPhoto?.path && !offline){
+        removePaymentAttachment(previous.path).catch(e=>console.error(e));
+      }
+      setForm(f=>({...f,photo}));
+    }catch(e){
+      console.error(e);
+      setErr(e.message||"Upload failed");
+    }finally{ setBusy(false); }
+  };
+
+  const clearPhoto=()=>{
+    const previous=form.photo;
+    setForm(f=>({...f,photo:null}));
+    if(previous?.path && previous.path!==originalPhoto?.path && !offline){
+      removePaymentAttachment(previous.path).catch(e=>console.error(e));
+    }
+  };
+
+  const save=()=>{
+    const item=form.item.trim();
+    if(!item){ setErr("Item is required"); return; }
+    if(busy) return;
+    const stamp=new Date().toISOString();
+    const existing=editing?products.find(p=>p.id===editing):null;
+    const row={
+      id:editing||draftId||uid(),
+      item,
+      room:form.room.trim(),
+      brand:form.brand.trim(),
+      model:form.model.trim(),
+      color:form.color.trim(),
+      vendor:form.vendor.trim(),
+      link:form.link.trim(),
+      notes:form.notes.trim(),
+      photo:selectionPhoto(form.photo),
+      createdAt:existing?.createdAt||stamp,
+      updatedAt:stamp,
+    };
+    const next=editing?products.map(p=>p.id===editing?row:p):[...products,row];
+    onUpdate(replaceProductSelections(project, next));
+    if(!offline && originalPhoto?.path && originalPhoto.path!==row.photo?.path){
+      removePaymentAttachment(originalPhoto.path).catch(e=>console.error(e));
+    }
+    setModal(false); setEditing(null); setDraftId(null); setOriginalPhoto(null); setErr(""); setForm(EMPTY_PRODUCT);
+  };
+
+  const del=(row)=>{
+    if(!confirm("Delete this item?")) return;
+    onUpdate(replaceProductSelections(project, products.filter(p=>p.id!==row.id)));
+    if(row.photo?.path && !offline) removePaymentAttachment(row.photo.path).catch(e=>console.error(e));
+  };
+
+  const setField=(key)=>(e)=>setForm(f=>({...f,[key]:e.target.value}));
+
+  return (
+    <div>
+      <div className="sec">Finishes & Products</div>
+      <div style={{padding:"0 13px 12px"}}>
+        <button className="btn" style={{padding:"14px 18px",fontSize:16}} onClick={openAdd}>+ Add</button>
+      </div>
+      {products.length===0&&<div className="card" style={{textAlign:"center",padding:28,color:"var(--muted)",fontSize:13,lineHeight:1.55}}>
+        No finishes or products yet.<br/>Add paint, flooring, fixtures, hardware — anything for this house.
+      </div>}
+      {groups.map(g=>(
+        <div key={g.room}>
+          <div style={{padding:"8px 16px 2px",fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".6px"}}>{g.room}</div>
+          {g.rows.map(row=>{
+            const meta=[row.brand,row.model,row.color].filter(Boolean).join(" · ");
+            const href=safeLink(row.link);
+            return (
+              <div key={row.id} className="card" style={{padding:13}}>
+                <div style={{fontWeight:600,fontSize:16}}>{row.item}</div>
+                {meta&&<div style={{fontSize:13,color:"var(--text)",marginTop:4,lineHeight:1.4}}>{meta}</div>}
+                {row.vendor&&<div style={{fontSize:12,color:"var(--muted)",marginTop:4}}>Vendor: {row.vendor}</div>}
+                {href&&<a href={href} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",marginTop:4,fontSize:13,color:"var(--blue)",wordBreak:"break-all"}}>{row.link}</a>}
+                {row.notes&&<div style={{fontSize:12,color:"var(--muted)",marginTop:6,whiteSpace:"pre-wrap",lineHeight:1.45}}>{row.notes}</div>}
+                {row.photo&&(offline
+                  ?<div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}><span className="tag tb" style={{fontSize:10}}>PHOTO</span><span style={{fontSize:12}}>{row.photo.name||"photo"}</span></div>
+                  :<div className="rcpt-row"><ReceiptThumb att={row.photo} onOpen={openReceipt}/></div>)}
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <button className="bto" style={{flex:1,padding:"11px 12px",fontSize:14}} onClick={()=>openEdit(row)}>Edit</button>
+                  <button className="btd" style={{flex:1,padding:"11px 12px",fontSize:14}} onClick={()=>del(row)}>Delete</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+
+      {modal&&<Modal title={editing?"Edit Item":"Add Item"} onClose={closeModal}>
+        <div className="fld"><label className="lbl">Item *</label><input className="inp" placeholder="e.g. Vanity faucet" value={form.item} onChange={setField("item")}/></div>
+        <div className="fld"><label className="lbl">Room</label><input className="inp" placeholder="e.g. Master Bath" value={form.room} onChange={setField("room")}/></div>
+        <div className="fld"><label className="lbl">Brand</label><input className="inp" placeholder="e.g. Delta" value={form.brand} onChange={setField("brand")}/></div>
+        <div className="fld"><label className="lbl">Model</label><input className="inp" placeholder="Model number" value={form.model} onChange={setField("model")}/></div>
+        <div className="fld"><label className="lbl">Color</label><input className="inp" placeholder="e.g. Chrome" value={form.color} onChange={setField("color")}/></div>
+        <div className="fld"><label className="lbl">Vendor</label><input className="inp" placeholder="e.g. Ferguson" value={form.vendor} onChange={setField("vendor")}/></div>
+        <div className="fld"><label className="lbl">Link</label><input className="inp" type="url" placeholder="https://..." value={form.link} onChange={setField("link")}/></div>
+        <div className="fld"><label className="lbl">Notes</label><textarea className="inp" rows={3} placeholder="Optional notes" value={form.notes} onChange={setField("notes")} style={{resize:"vertical"}}/></div>
+        <label className="lbl">Photo</label>
+        {form.photo&&(offline
+          ?<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><span className="tag tb" style={{fontSize:10}}>PHOTO</span><span style={{fontSize:12,flex:1}}>{form.photo.name||"photo"}</span><button type="button" className="btd" style={{padding:"8px 10px"}} onClick={clearPhoto}>Remove</button></div>
+          :<div className="rcpt-row" style={{marginBottom:8}}><ReceiptThumb att={form.photo} onOpen={openReceipt} onDelete={clearPhoto}/></div>)}
+        <label className="btn" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:12,padding:"13px 16px"}}>
+          <Ic.Cam/>
+          {busy?"Uploading…":form.photo?"Replace photo":"Add photo"}
+          <input type="file" accept="image/*" capture="environment" disabled={busy} style={{display:"none"}} onChange={e=>{ const file=e.target.files&&e.target.files[0]; e.target.value=""; if(file) onPhoto(file); }}/>
+        </label>
+        {err&&<div style={{fontSize:12,color:"var(--red)",marginBottom:10}}>{err}</div>}
+        <button className="btn" style={{padding:"14px 18px",fontSize:16}} onClick={save}>Save</button>
+        <button className="btg" onClick={closeModal}>Cancel</button>
+      </Modal>}
+    </div>
+  );
+}
+
 // ── MORE SCREEN ────────────────────────────────────────────────────────────
 function More({active,projects,onUpdate,updateActive,setTab,onSignOut}){
   const [editModal,setEditModal]=useState(false);
@@ -2286,6 +2482,7 @@ function More({active,projects,onUpdate,updateActive,setTab,onSignOut}){
 
   const menuItems=[
     {icon:"🎨",label:"Finishes & Specs",desc:"Paint colors, materials, product specs",action:()=>setTab("finishes_more"),needsProject:true},
+    ...(!active||isResidential(active.type)?[{icon:"📋",label:"Finishes & Products",desc:"Brands, colors, vendors, and photos by room",action:()=>setTab("selections_more"),needsProject:true}]:[]),
     ...(!active||hasClientFlow(active.type)?[{icon:"👁️",label:"Client Portal",desc:"View client progress & selections",action:()=>setTab("portal_more"),needsProject:true}]:[]),
     {icon:"✏️",label:"Edit Project Details",desc:"Name, address, job type, financials",action:()=>{setSelProject(active);setEditModal(true);},needsProject:true},
   ];
@@ -2362,8 +2559,10 @@ function EditProject({project,onSave,onClose}){
 
   const save=()=>{
     if(!form.name.trim()) return;
+    // Existing tasks, line items, and payments stay. Seed only when the job has no tasks.
+    const typed=projectWithType(project, form.type, buildPhases(form.type));
     const updated={
-      ...project, // existing phases/checklists are kept when type changes
+      ...typed,
       name:form.name,
       address:form.address,
       startDate:form.startDate,

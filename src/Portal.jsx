@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { loadProjectByPin } from "./supabase";
+import { isClientSelection } from "./jobModel";
 
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap');
@@ -123,11 +124,12 @@ export default function Portal() {
   const done = activeTasks.filter(t => t.completed).length;
   const pct = activeTasks.length ? Math.round(done / activeTasks.length * 100) : 0;
   const curPhase = project.phases?.find(ph => ph.tasks.some(t => !t.completed && !t.na));
-  const sels = project.selections || [];
+  const allSels = Array.isArray(project.selections) ? project.selections : [];
+  const sels = allSels.filter(isClientSelection);
   const pendingCOs = (project.changeOrders || []).filter(co => co.status === "presented");
 
   const choose = (selId, option) => {
-    const updated = { ...project, selections: sels.map(s => s.id === selId ? { ...s, chosen: option, chosenAt: new Date().toLocaleString() } : s) };
+    const updated = { ...project, selections: allSels.map(s => s.id === selId ? { ...s, chosen: option, chosenAt: new Date().toLocaleString() } : s) };
     setProject(updated);
   };
 

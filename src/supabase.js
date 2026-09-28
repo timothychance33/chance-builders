@@ -152,6 +152,15 @@ export const uploadFinancingAttachment = async ({ projectId, financingId, file }
   return uploadReceiptFile(path, file, mime, name);
 };
 
+/** Finishes & Products photo. Path: {projectId}/selections/{selectionId}/{safeFilename} */
+export const uploadSelectionPhoto = async ({ projectId, selectionId, file }) => {
+  const name = file?.name || 'photo';
+  const mime = file?.type || mimeFromName(name);
+  const stored = uniqueStoredName(name, mime);
+  const path = `${projectId}/selections/${selectionId}/${stored}`;
+  return uploadReceiptFile(path, file, mime, name);
+};
+
 /** Time-limited URL for viewing; do not persist this on the payment object. */
 export const signedUrlFor = async (path) => {
   const { data, error } = await supabase.storage.from(RECEIPTS_BUCKET).createSignedUrl(path, SIGNED_URL_TTL);
