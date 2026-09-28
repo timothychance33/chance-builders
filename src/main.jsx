@@ -10,6 +10,11 @@ function Root() {
   const isPortal = window.location.pathname === '/portal';
 
   React.useEffect(() => {
+    const fixture = import.meta.env.DEV && new URLSearchParams(window.location.search).get("fixture");
+    if (fixture) {
+      setSession(null);
+      return;
+    }
     getSession().then(setSession);
     const sub = onAuthChange(setSession);
     return () => sub.unsubscribe();
