@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { loadProjects, saveProject, deleteProject, loadContractors, saveContractor, deleteContractor, signOut, uploadPaymentAttachment, uploadFinancingAttachment, uploadSelectionPhoto, signedUrlFor, removePaymentAttachment } from "./supabase";
 import { collectCostGroups, collectJobReceipts, collectUtilityBills, FIN_TYPE_LABELS, FIN_TYPE_OPTIONS, partitionJobCosts, sumAmounts, sumCostGroups } from "./costGroups";
 import { isFlip, isResidential, phaseTemplateKind, projectWithType, isClientSelection, productSelections, replaceProductSelections, groupSelectionsByRoom, selectionPhoto, safeLink } from "./jobModel";
+import { BID_STATUSES, BID_STATUS_LABELS, budgetComparison, isOverBudget, moneyOrNull, summarizeRows, upsertBudgetLine, variance } from "./budgetLines";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const num = (s) => { const v = parseFloat(s); return isNaN(v) ? 0 : v; };
@@ -22,7 +23,7 @@ const JOB_TYPES = [
 const jobType = (type) => JOB_TYPES.find(t=>t.value===type) || JOB_TYPES[0];
 const isCostTracking = (type) => type === "commercial_rehab";
 const hasClientFlow = (type) => type === "custom" || type === "spec";
-const projectBudget = (proj) => (proj.phases||[]).reduce((s,ph)=>s+(ph.tasks||[]).reduce((ss,t)=>ss+num(t.estimate),0),0);
+const projectBudget = (proj) => budgetComparison(proj).totals.estimate ?? 0;
 
 function TypeSelect({value,onChange}){
   return (
@@ -345,6 +346,17 @@ select.fin-type{-webkit-appearance:menulist;appearance:auto}
 .fin-tap{cursor:pointer}
 .fin-tap:active{opacity:.75}
 .fin-chev{color:var(--muted);font-size:14px;line-height:1;margin-left:4px}
+.budget-find{margin:0 13px 8px}
+.budget-row{display:block;width:100%;text-align:left;background:transparent;border:none;border-bottom:1px solid var(--border);padding:12px 14px;cursor:pointer;font-family:'DM Sans',sans-serif;color:var(--text)}
+.budget-row:active{background:var(--card2)}
+.budget-name{font-size:14px;line-height:1.35;font-weight:500}
+.budget-meta{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.4}
+.budget-nums{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:8px}
+.budget-num .k{display:block;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.budget-num .v{font-size:15px;font-weight:600;margin-top:1px;font-variant-numeric:tabular-nums}
+.budget-varline{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;color:var(--muted);margin-top:4px}
+.budget-varline b{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.budget-sub{padding:12px 14px;background:var(--card2)}
 `;
 
 // ── ICONS ──────────────────────────────────────────────────────────────────
@@ -374,7 +386,7 @@ function Modal({children,onClose,title}){
     <div className="mb" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="modal">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          {title&&<div className="mt" style={{marginBottom:0}}>{title}</div>}
+          {title&&<div className="mt" style={{marginBottom:0,flex:1,minWidth:0,lineHeight:1.15,paddingRight:8}}>{title}</div>}
           <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",marginLeft:"auto",padding:2}} onClick={onClose}><Ic.X/></button>
         </div>
         {children}
@@ -591,6 +603,16 @@ export default function App({ session }) {
       });
       return;
     }
+    if(fixtureName==="budget"){
+      import("./fixtures/budget.js").then(({budgetProject, budgetContractors})=>{
+        setProjects([budgetProject]);
+        setContractors(budgetContractors);
+        setActiveId(budgetProject.id);
+        setTab("fin");
+        setLoaded(true);
+      });
+      return;
+    }
     if(fixtureName==="palmetto"){
       import("./fixtures/palmetto.js").then(({palmettoProject})=>{
         setProjects([palmettoProject]);
@@ -671,7 +693,7 @@ export default function App({ session }) {
           :<div>
             {tab==="dash"&&<Dashboard projects={projects} contractors={contractors} onOpen={openProject} onUpdate={setProj} onDelete={removeProject}/>}
             {tab==="check"&&active&&<Checklist project={active} contractors={contractors} onUpdate={updateActive} onOpenSelections={isResidential(active.type)?()=>setTab("selections_more"):null}/>}
-            {tab==="fin"&&active&&<Financials project={active} onUpdate={updateActive}/>}
+            {tab==="fin"&&active&&<Financials project={active} contractors={contractors} onUpdate={updateActive} startTab={fixtureName==="budget"?"budget":"summary"}/>}
             {tab==="directory"&&<Directory contractors={contractors} onUpdate={setCont}/>}
             {tab==="log"&&active&&<JobLog project={active} onUpdate={updateActive}/>}
             {tab==="more"&&<More active={active} projects={projects} onUpdate={setProj} updateActive={updateActive} setTab={setTab} onSignOut={signOut}/>}
@@ -1132,7 +1154,7 @@ function JobCostGroup({title, empty, entries, busy, err, onAdd, onType, onDelete
 }
 
 // ── FINANCIALS ─────────────────────────────────────────────────────────────
-function Financials({project,onUpdate}){
+function Financials({project,contractors,onUpdate,startTab}){
   const [coModal,setCoModal]=useState(false);
   const [coForm,setCoForm]=useState({description:"",amount:"",reason:"",date:"",status:"draft"});
   const [finModal,setFinModal]=useState(false);
@@ -1149,7 +1171,7 @@ function Financials({project,onUpdate}){
   const [purchaseInput,setPurchaseInput]=useState(project.purchasePrice||"");
   const [editHold,setEditHold]=useState(false);
   const [holdInput,setHoldInput]=useState(project.holdCosts||"");
-  const [finTab,setFinTab]=useState("summary");
+  const [finTab,setFinTab]=useState(startTab||"summary");
   const [costDrill,setCostDrill]=useState(null);
   const [finBusy,setFinBusy]=useState({});
   const [finErr,setFinErr]=useState({});
@@ -1292,7 +1314,7 @@ function Financials({project,onUpdate}){
         ))}
       </div>
 
-      {finTab==="budget"&&<BudgetView project={project} onUpdate={onUpdate}/>}
+      {finTab==="budget"&&<BudgetView project={project} contractors={contractors} onUpdate={onUpdate}/>}
 
       {finTab==="summary"&&<div className="card" style={{borderRadius:"0 0 12px 12px",marginTop:0}}>
         {costOnly?<>
@@ -2610,199 +2632,244 @@ function EditProject({project,onSave,onClose}){
 }
 
 // ── BUDGET VIEW ────────────────────────────────────────────────────────────
-function BudgetView({project,onUpdate}){
-  const [openPhase,setOpenPhase]=useState(null);
-  const [editTask,setEditTask]=useState(null); // {phIdx, tIdx}
+const fmtSigned=(n)=>{
+  if(n===null||n===undefined||Number.isNaN(n)) return "—";
+  if(n===0) return fmt(0);
+  return (n>0?"+":"−")+fmt(Math.abs(n));
+};
+const fmtPct=(n)=>{
+  if(n===null||n===undefined||Number.isNaN(n)) return "—";
+  if(Math.abs(n)<0.05) return "0.0%";
+  const body=Math.abs(n).toFixed(1)+"%";
+  if(n>0) return "+"+body;
+  if(n<0) return "−"+body;
+  return body;
+};
+const showMoney=(n,blankZero)=>{
+  if(n===null||n===undefined) return "—";
+  if(blankZero&&n===0) return "—";
+  return fmt(n);
+};
+const varianceColor=(result)=>{
+  if(isOverBudget(result)) return "var(--red)";
+  if(result&&typeof result.dollars==="number"&&result.dollars<0) return "var(--green)";
+  return "var(--muted)";
+};
+
+function VarianceLine({label,result}){
+  const empty=!result||result.dollars===null||result.dollars===undefined;
+  return (
+    <div className="budget-varline">
+      <span>{label}</span>
+      {empty
+        ?<b style={{color:"var(--muted)"}}>—</b>
+        :<b style={{color:varianceColor(result)}}>{fmtSigned(result.dollars)} <span style={{fontWeight:500}}>{fmtPct(result.percent)}</span></b>}
+    </div>
+  );
+}
+
+function BudgetView({project,contractors,onUpdate}){
+  const comparison=budgetComparison(project);
+  const [query,setQuery]=useState("");
+  const [editId,setEditId]=useState(null);
   const [draft,setDraft]=useState(null);
+  const [openIds,setOpenIds]=useState(()=>{
+    const byPhase=new Map();
+    for(const row of comparison.rows){
+      if(!byPhase.has(row.phaseId)) byPhase.set(row.phaseId,[]);
+      byPhase.get(row.phaseId).push(row);
+    }
+    const ids=[];
+    for(const [id,rows] of byPhase){
+      const s=summarizeRows(rows);
+      if(isOverBudget(s.actualVsBid)||isOverBudget(s.bidVsEstimate)) ids.push(id);
+    }
+    return ids;
+  });
 
-  const updateTask=(phIdx,tIdx,updates)=>{
-    const phases=project.phases.map((ph,pi)=>pi!==phIdx?ph:{
-      ...ph,tasks:ph.tasks.map((t,ti)=>ti!==tIdx?t:{...t,...updates})
-    });
-    onUpdate({...project,phases});
+  const q=query.trim().toLowerCase();
+  const visible=(row)=>{
+    if(row.na&&row.estimate===null&&row.bidAmount===null&&!row.actual) return false;
+    if(!q) return true;
+    return String(row.taskName||"").toLowerCase().includes(q)||String(row.taskId||"").toLowerCase().includes(q);
   };
+  const vendorName=(id)=>{
+    if(!id) return "";
+    const c=(contractors||[]).find(x=>x.id===id);
+    if(!c) return "";
+    return c.trade?`${c.name} · ${c.trade}`:c.name;
+  };
+  const vendors=[...(contractors||[])].sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),undefined,{sensitivity:"base"}));
 
-  const openEdit=(phIdx,tIdx)=>{
-    const t=project.phases[phIdx].tasks[tIdx];
+  const openEdit=(row)=>{
     setDraft({
-      estimate:t.estimate||"",
-      bid:t.bid||"",
-      actual:t.actual||"",
-      contractorId:t.contractorId||null,
-      notes:t.notes||"",
-      lineItems:[...(t.lineItems||[])],
+      estimate:row.estimateRaw||"",
+      bidAmount:row.bidAmountRaw||"",
+      contractorId:row.contractorId||"",
+      bidDate:row.bidDate||"",
+      bidStatus:row.bidStatus||"",
     });
-    setEditTask({phIdx,tIdx});
+    setEditId(row.taskId);
   };
-
   const saveEdit=()=>{
-    updateTask(editTask.phIdx,editTask.tIdx,draft);
-    setEditTask(null);setDraft(null);
+    onUpdate(upsertBudgetLine(project,{
+      taskId:editId,
+      estimate:draft.estimate,
+      bidAmount:draft.bidAmount,
+      contractorId:draft.contractorId,
+      bidDate:draft.bidDate,
+      bidStatus:draft.bidStatus,
+    }));
+    setEditId(null);setDraft(null);
   };
 
-  const addLI=()=>setDraft({...draft,lineItems:[...draft.lineItems,{id:uid(),description:"",labor:"",material:""}]});
-  const updLI=(id,k,v)=>setDraft({...draft,lineItems:draft.lineItems.map(li=>li.id===id?{...li,[k]:v}:li)});
-  const delLI=(id)=>setDraft({...draft,lineItems:draft.lineItems.filter(li=>li.id!==id)});
-
-  // Phase totals
-  const phaseTotal=(ph)=>{
-    const lis=ph.tasks.flatMap(t=>t.lineItems||[]);
-    const fromLI=lis.reduce((s,li)=>s+num(li.labor)+num(li.material),0);
-    const fromFields=ph.tasks.reduce((s,t)=>s+num(t.estimate),0);
-    return fromLI||fromFields;
-  };
-
-  const grandEstimate=project.phases.reduce((s,ph)=>s+ph.tasks.reduce((ss,t)=>ss+num(t.estimate),0),0);
-  const grandBid=project.phases.reduce((s,ph)=>s+ph.tasks.reduce((ss,t)=>ss+num(t.bid),0),0);
-  const grandActual=project.phases.reduce((s,ph)=>s+ph.tasks.flatMap(t=>t.lineItems||[]).reduce((ss,li)=>ss+num(li.labor)+num(li.material),0),0)||
-    project.phases.reduce((s,ph)=>s+ph.tasks.reduce((ss,t)=>ss+num(t.actual),0),0);
+  const totals=comparison.totals;
+  const overBid=comparison.rows.filter(r=>isOverBudget(r.actualVsBid)).length;
+  const overEst=comparison.rows.filter(r=>isOverBudget(r.bidVsEstimate)).length;
+  const editing=editId?comparison.rows.find(r=>r.taskId===editId):null;
+  const liveEstimate=draft?moneyOrNull(draft.estimate):null;
+  const liveBid=draft?moneyOrNull(draft.bidAmount):null;
+  const liveActual=editing?editing.actual:0;
+  const phases=project.phases||[];
 
   return (
     <div>
-      {/* Grand totals bar */}
       <div className="card" style={{borderRadius:"0 0 12px 12px",marginTop:0,padding:"12px 14px"}}>
+        <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Job total</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-          {[{l:"Est. Total",v:grandEstimate,c:"var(--text)"},{l:"Bid Total",v:grandBid,c:"var(--blue)"},{l:"Actual Total",v:grandActual,c:grandActual>grandEstimate&&grandEstimate?"var(--red)":grandActual?"var(--green)":"var(--text)"}].map(({l,v,c})=>(
-            <div key={l} className="c2" style={{padding:"8px 10px",textAlign:"center"}}>
+          {[
+            {l:"Estimate",v:showMoney(totals.estimate),c:"var(--text)"},
+            {l:"Bid",v:showMoney(totals.bid),c:"var(--blue)"},
+            {l:"Actual",v:showMoney(totals.actual,true),c:isOverBudget(totals.actualVsBid)?"var(--red)":totals.actual?"var(--green)":"var(--text)"},
+          ].map(({l,v,c})=>(
+            <div key={l} className="c2" style={{padding:"8px 6px",textAlign:"center"}}>
               <div style={{fontSize:9,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px",marginBottom:3}}>{l}</div>
-              <div style={{fontSize:15,fontWeight:700,color:c}}>{v?fmt(v):"—"}</div>
+              <div style={{fontSize:15,fontWeight:700,color:c,fontVariantNumeric:"tabular-nums"}}>{v}</div>
             </div>
           ))}
         </div>
+        <div style={{marginTop:8}}>
+          <VarianceLine label="Actual vs bid" result={totals.actualVsBid}/>
+          <VarianceLine label="Bid vs estimate" result={totals.bidVsEstimate}/>
+        </div>
+        {(overBid>0||overEst>0)&&<div style={{fontSize:12,color:"var(--red)",marginTop:8,lineHeight:1.4}}>
+          {overBid>0&&<span>{overBid} task{overBid>1?"s":""} over bid</span>}
+          {overBid>0&&overEst>0&&<span> · </span>}
+          {overEst>0&&<span>{overEst} bid{overEst>1?"s":""} over estimate</span>}
+        </div>}
+        <div style={{fontSize:11,color:"var(--muted)",marginTop:8,lineHeight:1.4}}>Actual is labor + materials on the task, not payments. Tap a task to enter the estimate and bid.</div>
       </div>
 
-      <div style={{fontSize:10,color:"var(--muted)",padding:"10px 16px 4px",letterSpacing:".5px",textTransform:"uppercase"}}>
-        Tap any task to enter estimate · bid · actual
+      <div className="budget-find">
+        <input className="inp" placeholder="Find a task" value={query} onChange={e=>setQuery(e.target.value)} style={{fontSize:16}} enterKeyHint="search"/>
       </div>
 
-      {/* Phase accordions */}
-      {project.phases.map((ph,phIdx)=>{
-        const isOpen=openPhase===phIdx;
-        const total=phaseTotal(ph);
-        const taskEstimate=ph.tasks.reduce((s,t)=>s+num(t.estimate),0);
-        const taskBid=ph.tasks.reduce((s,t)=>s+num(t.bid),0);
-        const taskActual=ph.tasks.flatMap(t=>t.lineItems||[]).reduce((s,li)=>s+num(li.labor)+num(li.material),0)||
-          ph.tasks.reduce((s,t)=>s+num(t.actual),0);
+      {phases.length===0&&<div className="card" style={{textAlign:"center",color:"var(--muted)",fontSize:13}}>No tasks on this job yet.</div>}
 
+      {phases.map(ph=>{
+        const phaseRows=comparison.rows.filter(r=>r.phaseId===ph.id);
+        const shown=phaseRows.filter(visible);
+        if(!shown.length) return null;
+        const isOpen=!!q||openIds.includes(ph.id);
+        const phaseSummary=summarizeRows(shown);
         return (
-          <div key={ph.id} style={{marginBottom:1}}>
-            <div className="ph" onClick={()=>setOpenPhase(isOpen?null:phIdx)}>
+          <div key={ph.id}>
+            <div className="ph" onClick={()=>setOpenIds(prev=>prev.includes(ph.id)?prev.filter(id=>id!==ph.id):[...prev,ph.id])}>
               <span style={{fontSize:19}}>{ph.icon}</span>
-              <div style={{flex:1}}>
+              <div style={{flex:1,minWidth:0}}>
                 <div className="phn">{ph.short||ph.name}</div>
-                {(taskEstimate||taskBid||taskActual)>0&&(
-                  <div style={{display:"flex",gap:10,marginTop:3}}>
-                    {taskEstimate>0&&<span style={{fontSize:9,color:"var(--muted)"}}>Est: <b style={{color:"var(--text)"}}>{fmt(taskEstimate)}</b></span>}
-                    {taskBid>0&&<span style={{fontSize:9,color:"var(--muted)"}}>Bid: <b style={{color:"var(--blue)"}}>{fmt(taskBid)}</b></span>}
-                    {taskActual>0&&<span style={{fontSize:9,color:"var(--muted)"}}>Act: <b style={{color:"var(--green)"}}>{fmt(taskActual)}</b></span>}
-                  </div>
-                )}
+                <div style={{display:"flex",flexWrap:"wrap",gap:"2px 10px",marginTop:3}}>
+                  <span style={{fontSize:11,color:"var(--muted)"}}>Est <b style={{color:"var(--text)"}}>{showMoney(phaseSummary.estimate)}</b></span>
+                  <span style={{fontSize:11,color:"var(--muted)"}}>Bid <b style={{color:"var(--blue)"}}>{showMoney(phaseSummary.bid)}</b></span>
+                  <span style={{fontSize:11,color:"var(--muted)"}}>Act <b style={{color:isOverBudget(phaseSummary.actualVsBid)?"var(--red)":phaseSummary.actual?"var(--green)":"var(--muted)"}}>{showMoney(phaseSummary.actual,true)}</b></span>
+                </div>
               </div>
               <Ic.Chev u={isOpen}/>
             </div>
-
-            {isOpen&&(
-              <div style={{background:"var(--card)",borderBottom:"1px solid var(--border)"}}>
-                {/* Column headers */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 72px 72px 72px 24px",gap:4,padding:"6px 14px",borderBottom:"1px solid var(--border)",background:"var(--card2)"}}>
-                  <div style={{fontSize:9,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>Task</div>
-                  <div style={{fontSize:9,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px",textAlign:"right"}}>Estimate</div>
-                  <div style={{fontSize:9,color:"var(--blue)",textTransform:"uppercase",letterSpacing:".4px",textAlign:"right"}}>Bid</div>
-                  <div style={{fontSize:9,color:"var(--green)",textTransform:"uppercase",letterSpacing:".4px",textAlign:"right"}}>Actual</div>
-                  <div/>
-                </div>
-
-                {ph.tasks.filter(t=>!t.na).map((task,tIdx)=>{
-                  const liActual=(task.lineItems||[]).reduce((s,li)=>s+num(li.labor)+num(li.material),0);
-                  const actual=liActual||num(task.actual);
-                  const variance=actual-num(task.estimate);
-                  return (
-                    <div key={task.id} style={{display:"grid",gridTemplateColumns:"1fr 72px 72px 72px 24px",gap:4,padding:"8px 14px",borderBottom:"1px solid var(--border)",alignItems:"center",cursor:"pointer"}}
-                      onClick={()=>openEdit(phIdx,tIdx)}>
-                      <div>
-                        <div style={{fontSize:12,lineHeight:1.3,color:task.completed?"var(--muted)":"var(--text)"}}>{task.name}</div>
-                        {task.contractorId&&(()=>{const c=null; return null;})()}
+            {isOpen&&<div style={{background:"var(--card)",borderBottom:"1px solid var(--border)"}}>
+              {shown.map(row=>{
+                const meta=[
+                  row.bidStatus?BID_STATUS_LABELS[row.bidStatus]:"",
+                  vendorName(row.contractorId),
+                  row.bidDate,
+                ].filter(Boolean).join(" · ");
+                return (
+                  <button key={row.taskId} type="button" className="budget-row" onClick={()=>openEdit(row)}>
+                    <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div className="budget-name">{row.taskName}</div>
+                        {meta&&<div className="budget-meta">{meta}</div>}
                       </div>
-                      <div style={{fontSize:12,textAlign:"right",color:"var(--text)",fontWeight:num(task.estimate)?"600":"400"}}>{num(task.estimate)?fmt(task.estimate):<span style={{color:"var(--border)"}}>—</span>}</div>
-                      <div style={{fontSize:12,textAlign:"right",color:"var(--blue)",fontWeight:num(task.bid)?"600":"400"}}>{num(task.bid)?fmt(task.bid):<span style={{color:"var(--border)"}}>—</span>}</div>
-                      <div style={{fontSize:12,textAlign:"right",color:variance>0&&num(task.estimate)?"var(--red)":actual?"var(--green)":"var(--muted)",fontWeight:actual?"600":"400"}}>{actual?fmt(actual):<span style={{color:"var(--border)"}}>—</span>}</div>
-                      <div style={{color:"var(--muted)",fontSize:12,textAlign:"center"}}>›</div>
+                      <span style={{color:"var(--muted)",fontSize:16,lineHeight:1.2}}>›</span>
                     </div>
-                  );
-                })}
-
-                {/* Phase subtotal */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 72px 72px 72px 24px",gap:4,padding:"8px 14px",background:"var(--card2)"}}>
-                  <div style={{fontSize:10,color:"var(--gold)",textTransform:"uppercase",letterSpacing:".4px",fontWeight:600}}>Phase Total</div>
-                  <div style={{fontSize:12,textAlign:"right",color:"var(--text)",fontWeight:700}}>{taskEstimate?fmt(taskEstimate):"—"}</div>
-                  <div style={{fontSize:12,textAlign:"right",color:"var(--blue)",fontWeight:700}}>{taskBid?fmt(taskBid):"—"}</div>
-                  <div style={{fontSize:12,textAlign:"right",color:"var(--green)",fontWeight:700}}>{taskActual?fmt(taskActual):"—"}</div>
-                  <div/>
+                    <div className="budget-nums">
+                      <div className="budget-num"><span className="k">Estimate</span><span className="v">{showMoney(row.estimate)}</span></div>
+                      <div className="budget-num"><span className="k">Bid</span><span className="v" style={{color:"var(--blue)"}}>{showMoney(row.bidAmount)}</span></div>
+                      <div className="budget-num"><span className="k">Actual</span><span className="v" style={{color:isOverBudget(row.actualVsBid)?"var(--red)":row.actual?"var(--green)":"var(--muted)"}}>{showMoney(row.actual,true)}</span></div>
+                    </div>
+                    <VarianceLine label="Actual vs bid" result={row.actualVsBid}/>
+                    <VarianceLine label="Bid vs estimate" result={row.bidVsEstimate}/>
+                  </button>
+                );
+              })}
+              <div className="budget-sub">
+                <div style={{fontSize:10,color:"var(--gold)",textTransform:"uppercase",letterSpacing:".4px",fontWeight:600,marginBottom:4}}>Phase total</div>
+                <div className="budget-nums" style={{marginTop:0}}>
+                  <div className="budget-num"><span className="k">Estimate</span><span className="v">{showMoney(phaseSummary.estimate)}</span></div>
+                  <div className="budget-num"><span className="k">Bid</span><span className="v" style={{color:"var(--blue)"}}>{showMoney(phaseSummary.bid)}</span></div>
+                  <div className="budget-num"><span className="k">Actual</span><span className="v" style={{color:isOverBudget(phaseSummary.actualVsBid)?"var(--red)":phaseSummary.actual?"var(--green)":"var(--text)"}}>{showMoney(phaseSummary.actual,true)}</span></div>
                 </div>
+                <VarianceLine label="Actual vs bid" result={phaseSummary.actualVsBid}/>
+                <VarianceLine label="Bid vs estimate" result={phaseSummary.bidVsEstimate}/>
               </div>
-            )}
+            </div>}
           </div>
         );
       })}
 
-      {/* Task edit modal */}
-      {editTask&&draft&&(()=>{
-        const task=project.phases[editTask.phIdx].tasks[editTask.tIdx];
-        const liTotal=draft.lineItems.reduce((s,li)=>s+num(li.labor)+num(li.material),0);
-        return (
-          <Modal title={task.name} onClose={()=>{setEditTask(null);setDraft(null);}}>
-            <div className="tab-row">
-              {["quick","line items"].map(t=>{
-                const [activeSubTab,setActiveSubTab]=[draft._subtab||"quick",(v)=>setDraft({...draft,_subtab:v})];
-                return <div key={t} className={`tab${activeSubTab===t?" on":""}`} onClick={()=>setActiveSubTab(t)} style={{textTransform:"capitalize"}}>{t}</div>;
-              })}
-            </div>
+      {q&&!comparison.rows.some(visible)&&<div className="card" style={{textAlign:"center",color:"var(--muted)",fontSize:13}}>No matching tasks.</div>}
 
-            {(draft._subtab||"quick")==="quick"&&<>
-              <div className="row3" style={{gap:8,marginBottom:12}}>
-                {[{l:"Your Estimate ($)",k:"estimate"},{l:"Sub's Bid ($)",k:"bid"},{l:"Actual Cost ($)",k:"actual"}].map(({l,k})=>(
-                  <div key={k}><label className="lbl">{l}</label><input className="inp" type="number" placeholder="0" value={draft[k]} onChange={e=>setDraft({...draft,[k]:e.target.value})} style={{fontSize:13,padding:"8px 10px"}}/></div>
-                ))}
-              </div>
-              {num(draft.estimate)>0&&num(draft.bid)>0&&(
-                <div style={{fontSize:11,marginBottom:8}}>
-                  Bid vs Estimate: <b style={{color:num(draft.bid)>num(draft.estimate)?"var(--red)":"var(--green)"}}>
-                    {num(draft.bid)>num(draft.estimate)?"+":""}{fmt(num(draft.bid)-num(draft.estimate))}
-                  </b>
-                </div>
-              )}
-              <div className="fld">
-                <label className="lbl">Notes</label>
-                <textarea className="inp" rows={2} placeholder="Sub name, material specs, anything relevant..." value={draft.notes} onChange={e=>setDraft({...draft,notes:e.target.value})} style={{resize:"vertical"}}/>
-              </div>
-            </>}
-
-            {(draft._subtab||"quick")==="line items"&&<>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                <div style={{fontSize:11,color:"var(--muted)"}}>Total: <b style={{color:"var(--text)",fontSize:13}}>{fmt(liTotal)}</b></div>
-                <button className="bto" style={{fontSize:11,padding:"5px 10px"}} onClick={addLI}>+ Line Item</button>
-              </div>
-              {draft.lineItems.length===0&&<div style={{fontSize:12,color:"var(--muted)",textAlign:"center",padding:"16px 0"}}>No line items. Add vendors, materials, labor separately for detailed tracking.</div>}
-              {draft.lineItems.map(li=>(
-                <div key={li.id} className="c2" style={{marginBottom:8}}>
-                  <div style={{display:"flex",gap:6,marginBottom:6,alignItems:"center"}}>
-                    <input className="inp" placeholder="Description (e.g. Pump truck, concrete, labor)" value={li.description} onChange={e=>updLI(li.id,"description",e.target.value)} style={{flex:1,fontSize:12,padding:"7px 9px"}}/>
-                    <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",flexShrink:0}} onClick={()=>delLI(li.id)}><Ic.Trash/></button>
-                  </div>
-                  <div className="row2">
-                    <div><label className="lbl">Labor ($)</label><input className="inp" type="number" placeholder="0" value={li.labor} onChange={e=>updLI(li.id,"labor",e.target.value)} style={{fontSize:12,padding:"7px 9px"}}/></div>
-                    <div><label className="lbl">Materials ($)</label><input className="inp" type="number" placeholder="0" value={li.material} onChange={e=>updLI(li.id,"material",e.target.value)} style={{fontSize:12,padding:"7px 9px"}}/></div>
-                  </div>
-                  <div style={{fontSize:10,color:"var(--muted)",marginTop:4,textAlign:"right"}}>Subtotal: <b style={{color:"var(--text)"}}>{fmt(num(li.labor)+num(li.material))}</b></div>
-                </div>
-              ))}
-            </>}
-
-            <button className="btn" style={{marginTop:8}} onClick={saveEdit}>Save</button>
-            <button className="btg" onClick={()=>{setEditTask(null);setDraft(null);}}>Cancel</button>
-          </Modal>
-        );
-      })()}
+      {editing&&draft&&(
+        <Modal title={editing.taskName} onClose={()=>{setEditId(null);setDraft(null);}}>
+          <div className="c2" style={{marginBottom:12}}>
+            <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>Actual from task costs</div>
+            <div style={{fontSize:22,fontWeight:700,color:isOverBudget(editing.actualVsBid)?"var(--red)":"var(--text)",marginTop:2}}>{showMoney(editing.actual,true)}</div>
+            <div style={{fontSize:11,color:"var(--muted)",marginTop:4,lineHeight:1.4}}>Labor and materials already logged on this task. Change those on the checklist. This screen does not edit costs or payments.</div>
+          </div>
+          <div className="fld">
+            <label className="lbl">Estimate ($)</label>
+            <input className="inp" inputMode="decimal" placeholder="Blank if you don't have one" value={draft.estimate} onChange={e=>setDraft({...draft,estimate:e.target.value})} style={{fontSize:16}}/>
+          </div>
+          <div className="fld">
+            <label className="lbl">Bid ($)</label>
+            <input className="inp" inputMode="decimal" placeholder="Blank if no bid yet" value={draft.bidAmount} onChange={e=>setDraft({...draft,bidAmount:e.target.value})} style={{fontSize:16}}/>
+          </div>
+          <div className="c2" style={{marginBottom:12}}>
+            <VarianceLine label="Actual vs bid" result={variance(liveActual,liveBid)}/>
+            <VarianceLine label="Bid vs estimate" result={variance(liveBid,liveEstimate)}/>
+          </div>
+          <div className="fld">
+            <label className="lbl">Vendor / contractor</label>
+            <select className="inp" value={draft.contractorId} onChange={e=>setDraft({...draft,contractorId:e.target.value})} style={{fontSize:16}}>
+              <option value="">— None —</option>
+              {vendors.map(c=><option key={c.id} value={c.id}>{c.name}{c.trade?` (${c.trade})`:""}</option>)}
+            </select>
+          </div>
+          <div className="fld">
+            <label className="lbl">Bid date</label>
+            <input className="inp" type="date" value={draft.bidDate} onChange={e=>setDraft({...draft,bidDate:e.target.value})} style={{fontSize:16}}/>
+          </div>
+          <div className="fld">
+            <label className="lbl">Bid status</label>
+            <select className="inp" value={draft.bidStatus} onChange={e=>setDraft({...draft,bidStatus:e.target.value})} style={{fontSize:16}}>
+              <option value="">— None —</option>
+              {BID_STATUSES.map(s=><option key={s} value={s}>{BID_STATUS_LABELS[s]}</option>)}
+            </select>
+          </div>
+          <button className="btn" type="button" onClick={saveEdit}>Save estimate & bid</button>
+          <button className="btg" type="button" onClick={()=>{setEditId(null);setDraft(null);}}>Cancel</button>
+        </Modal>
+      )}
     </div>
   );
 }
